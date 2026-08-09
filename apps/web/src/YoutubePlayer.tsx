@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  stopYoutubePlayer,
+  type YoutubePlayerInstance,
+} from "./youtube-player-instance";
 
 interface YoutubePlayerProps {
   onEnded: () => void;
   onFailed: () => void;
   playbackState: "paused" | "playing";
   videoId: string;
-}
-
-interface YoutubePlayerInstance {
-  destroy(): void;
-  mute(): void;
-  pauseVideo(): void;
-  playVideo(): void;
 }
 
 interface YoutubePlayerEvent {
@@ -144,10 +141,7 @@ export function YoutubePlayer({
 
     return () => {
       active = false;
-      const player = playerRef.current;
-      player?.pauseVideo();
-      player?.mute();
-      player?.destroy();
+      stopYoutubePlayer(playerRef.current);
       playerRef.current = undefined;
       playerReadyRef.current = false;
     };

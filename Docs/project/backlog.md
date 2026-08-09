@@ -28,9 +28,10 @@ Priorités :
 | 12 | PROVIDER-003 | P0 | DONE | DISC-002, PLAYER-001 | YouTube réel validé : recherche serveur et lecture IFrame visible |
 | 13 | LOBBY-002 | P0 | DONE | QUEUE-001, PLAYER-001 | reconnexion, expiration et fermeture/purge |
 | 14 | UX-001 | P0 | DONE | QUEUE-001, PLAYER-001, PROVIDER-003 | interface du lobby recentrée sur la lecture et la file |
-| 15 | PLAYER-002 | P0 | IN_PROGRESS | PLAYER-001, PROVIDER-003 | tout appareil qui rejoint sans détenir le bail reste silencieux |
-| 16 | SEC-001 | P0 | READY | PROVIDER-003, LOBBY-002 | qualification sécurité et résilience |
-| 17 | QA-001 | P0 | TODO | UX-001, PLAYER-002, SEC-001 | candidat MVP démontrable à trois appareils |
+| 15 | PLAYER-002 | P0 | DONE | PLAYER-001, PROVIDER-003 | tout appareil qui rejoint sans détenir le bail reste silencieux |
+| 16 | DEPLOY-001 | P0 | VERIFY | FOUND-001, PROVIDER-003, LOBBY-002 | Compose sûr derrière Caddy sur un sous-domaine HTTPS |
+| 17 | SEC-001 | P0 | READY | PROVIDER-003, LOBBY-002 | qualification sécurité et résilience |
+| 18 | QA-001 | P0 | TODO | UX-001, PLAYER-002, DEPLOY-001, SEC-001 | candidat MVP démontrable à trois appareils |
 
 ## Cadrage
 
@@ -222,6 +223,19 @@ Critères d'acceptation :
 - Un parcours navigateur exerce ouverture des réglages, copie, ajout confirmé et fermeture, avec captures mobile et bureau examinées.
 
 ## Stabilisation
+
+### DEPLOY-001 — Déploiement Compose derrière Caddy
+
+Objectif : faire coexister EasyPlaylist avec GuessThePolitician sur le VPS Hostinger sans exposer directement l'API ou PostgreSQL.
+
+Critères d'acceptation :
+
+- Le Compose principal ne publie que le frontend sur l'interface loopback du VPS ; l'API et PostgreSQL restent exclusivement sur leurs réseaux Docker privés.
+- Un override local/test permet encore d'exposer les ports nécessaires sur loopback sans rendre les services accessibles sur toutes les interfaces.
+- Caddy route `playlist.guesstheappliance.com` vers le frontend EasyPlaylist, qui continue de relayer `/api` et `/socket.io` en interne.
+- La configuration de production exige cookies sécurisés, secrets uniques et clé YouTube uniquement côté API.
+- Les configurations Compose fusionnées sont valides et les stacks de base vierge, migrations, healthchecks, API, temps réel et navigateur restent fonctionnelles.
+- La documentation fournit les commandes de démarrage, validation, rechargement Caddy et retour arrière sans publier ni modifier le VPS automatiquement.
 
 ### PLAYER-002 — Silence des appareils non lecteurs
 

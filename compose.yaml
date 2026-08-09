@@ -7,8 +7,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-easyplaylist}
       POSTGRES_USER: ${POSTGRES_USER:-easyplaylist}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
-    ports:
-      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
@@ -38,8 +36,6 @@ services:
       YOUTUBE_REGION_CODE: ${YOUTUBE_REGION_CODE:-FR}
       SECRETS_ACTIVE_KEY_VERSION: ${SECRETS_ACTIVE_KEY_VERSION:-1}
       SECRETS_ENCRYPTION_KEY_V1: ${SECRETS_ENCRYPTION_KEY_V1:-bG9jYWwtZGV2ZWxvcG1lbnQtZW5jcnlwdGlvbi1rZXk=}
-    ports:
-      - "${API_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
@@ -65,7 +61,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
-      - "${WEB_PORT:-5173}:80"
+      - "127.0.0.1:${WEB_PORT:-5173}:80"
     depends_on:
       api:
         condition: service_healthy

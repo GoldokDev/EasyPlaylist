@@ -19,7 +19,7 @@ Docker Compose lance trois services de produit :
 - `api` porte l'autorité métier, OAuth, la file et les connexions temps réel ;
 - `db` conserve l'état durable et les secrets chiffrés dans PostgreSQL.
 
-Un reverse proxy, Redis, un worker séparé et l'orchestration multi-instance restent hors MVP.
+Le reverse proxy Caddy déjà installé sur le VPS termine TLS et route les noms d'hôte vers les frontends liés à loopback. Il reste extérieur aux stacks Compose. Redis, un worker séparé et l'orchestration multi-instance restent hors MVP.
 
 ## Stack du socle
 
@@ -197,8 +197,8 @@ Les adaptateurs dépendent du domaine et implémentent ses ports ; le domaine ne
 
 ## Environnements
 
-- Local : Docker Compose, faux fournisseur déterministe et callbacks locaux lorsqu'ils sont acceptés.
+- Local : Docker Compose principal avec seulement le frontend publié sur loopback ; l'override `compose.local.yaml` publie explicitement l'API et PostgreSQL sur loopback lorsqu'un outil local en a besoin. Le faux fournisseur reste déterministe.
 - Test : base isolée, horloge contrôlable, adaptateurs fake, navigateur headless.
-- Réel MVP : site HTTPS accessible aux invités, clé YouTube Data API v3 restreinte côté Google Cloud, cookies sécurisés, lecteur IFrame visible, politique de confidentialité et liens vers les conditions YouTube/Google. Spotify et Deezer restent hors MVP.
+- Réel MVP : `compose.production.yaml` exige les secrets, force les cookies sécurisés et conserve l'exposition du frontend sur loopback. `playlist.guesstheappliance.com` est servi en HTTPS par le Caddy système vers `127.0.0.1:5173`. L'API et PostgreSQL restent privés dans Docker. La clé YouTube Data API v3 est restreinte côté Google Cloud et le lecteur IFrame reste visible. La politique de confidentialité et les liens vers les conditions YouTube/Google restent requis. Spotify et Deezer restent hors MVP.
 
 Un mock prouve le contrat interne, pas la conformité ni la capacité d'une API réelle.

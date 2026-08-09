@@ -389,6 +389,7 @@ test("creates, shares, joins and resumes a lobby on mobile", async ({
   ).toHaveCount(0);
 
   const sameBrowserPage = await page.context().newPage();
+  await sameBrowserPage.setViewportSize({ height: 844, width: 390 });
   sameBrowserPage.on("console", (message) => {
     if (message.type() === "error") {
       consoleErrors.push(message.text());
@@ -414,10 +415,7 @@ test("creates, shares, joins and resumes a lobby on mobile", async ({
   expect(playerDeviceId).not.toBe(sameBrowserDeviceId);
   await sameBrowserPage.screenshot({
     fullPage: true,
-    path: resolve(
-      artifactDirectory,
-      "player-002-silent-second-tab-mobile.png",
-    ),
+    path: resolve(artifactDirectory, "player-002-silent-second-tab-mobile.png"),
   });
   await sameBrowserPage.close();
 

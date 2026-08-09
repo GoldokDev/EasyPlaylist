@@ -1,0 +1,12 @@
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the production .env file}
+
+  api:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-easyplaylist}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the production .env file}@db:5432/${POSTGRES_DB:-easyplaylist}
+      COOKIE_SECURE: "true"
+      GUEST_COOKIE_SIGNING_KEY: ${GUEST_COOKIE_SIGNING_KEY:?Set GUEST_COOKIE_SIGNING_KEY in the production .env file}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:?Set YOUTUBE_API_KEY in the production .env file}
+      SECRETS_ENCRYPTION_KEY_V1: ${SECRETS_ENCRYPTION_KEY_V1:?Set SECRETS_ENCRYPTION_KEY_V1 in the production .env file}

@@ -16,8 +16,16 @@ docker compose up --build
 Une base PostgreSQL vierge est créée automatiquement au premier lancement. Quand les trois healthchecks sont au vert :
 
 - interface : <http://127.0.0.1:5173> ;
-- liveness API : <http://127.0.0.1:3000/health/live> ;
-- readiness API et PostgreSQL : <http://127.0.0.1:3000/health/ready>.
+- liveness API via le frontend : <http://127.0.0.1:5173/api/health/live> ;
+- readiness API et PostgreSQL via le frontend : <http://127.0.0.1:5173/api/health/ready>.
+
+Le Compose principal ne publie ni l'API ni PostgreSQL. Pour qu'un outil de développement local les joigne directement, utiliser l'override qui les lie exclusivement à loopback :
+
+```powershell
+docker compose -f compose.yaml -f compose.local.yaml up --build
+```
+
+L'API et PostgreSQL deviennent alors accessibles sur `127.0.0.1:3000` et `127.0.0.1:5432`.
 
 Depuis l'interface, un organisateur saisit le nom de la soirée et son pseudonyme, puis partage le code ou le lien produit. Un invité ouvre ce lien, choisit son pseudonyme et retrouve ensuite le lobby après rafraîchissement grâce à son cookie signé.
 
@@ -40,6 +48,8 @@ npm run db:migrate
 ```
 
 Le cookie invité est `HttpOnly`, signé et limité à 24 heures. `COOKIE_SECURE=false` convient uniquement au HTTP local ; un déploiement HTTPS doit utiliser `COOKIE_SECURE=true`, une clé de signature unique et une clé de chiffrement de 32 octets encodée en base64.
+
+Le déploiement sur le VPS Hostinger, le bloc Caddy pour `playlist.guesstheappliance.com` et la procédure de retour arrière sont détaillés dans [le guide de déploiement](Docs/architecture/deployment.md).
 
 ## Développement local
 

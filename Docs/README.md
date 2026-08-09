@@ -13,6 +13,7 @@ Ce dossier contient les sources canoniques d'EasyPlaylist. Les notes historiques
 ### Technique
 
 - [Architecture proposée](architecture/technical-design.md) — services, données, sécurité et règles de dépendance.
+- [Déploiement VPS](architecture/deployment.md) — coexistence derrière Caddy, secrets, vérifications et retour arrière.
 - [Modèle de fournisseurs](architecture/provider-model.md) — contrat de capacités et isolation des connecteurs.
 - [Faisabilité des fournisseurs](architecture/provider-feasibility.md) — matrice officielle datée, contraintes de lecture et verdicts.
 
