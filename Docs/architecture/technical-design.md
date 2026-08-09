@@ -61,6 +61,8 @@ Ne pas créer de package partagé tant qu'il n'a pas au moins deux consommateurs
 
 Responsable du code d'invitation, du cycle de vie, des membres, de la présence et de la fermeture. Les actions ordinaires sont ouvertes à tous ; le créateur conserve uniquement la fermeture définitive.
 
+Depuis `BLIND-001`, le lobby porte aussi `blind_test_enabled`, désactivé par défaut. Le créateur est seul à modifier ce réglage ; la mutation se sérialise sur la même ligne que la file et incrémente sa version seulement lors d'un changement effectif.
+
 ### Provider connection
 
 Responsable du consentement OAuth à l'usage par le lobby, des jetons chiffrés, des capacités déclarées, de l'expiration et de la révocation. Le domaine ne manipule jamais un SDK directement.
@@ -79,7 +81,7 @@ Autorité sur le titre courant, l'ordre, l'historique court et les mutations ide
 
 `QueueService` verrouille la ligne du lobby dans une transaction PostgreSQL avant toute mutation. L'ajout accepte une version optionnelle et sérialise les ajouts concurrents ; le retrait et le réordonnancement exigent la version observée. Le premier réordonnancement concurrent gagne et les suivants reçoivent `QUEUE_VERSION_CONFLICT` avec le snapshot autoritaire. Les reçus lient l'identifiant de commande à l'acteur, au type et à l'empreinte du contenu ; un rejeu identique ne remute pas la file et une réutilisation différente est refusée.
 
-Les positions durables sont allouées de façon monotone. Un réordonnancement utilise une plage dérivée de la nouvelle version, afin que les lignes historiques retirées ne puissent pas entrer en collision avec l'ordre actif. Un snapshot public contient au plus 200 titres, leur auteur, la version du lobby et les variantes autorisées, sans credential.
+Les positions durables sont allouées de façon monotone. Un réordonnancement utilise une plage dérivée de la nouvelle version, afin que les lignes historiques retirées ne puissent pas entrer en collision avec l'ordre actif. En mode normal, un snapshot public contient au plus 200 titres, leur auteur, la version du lobby et les variantes autorisées, sans credential. En blind test, le schéma public alternatif contient uniquement le nombre d'items en attente ; il ne possède structurellement aucun champ d'item, auteur, métadonnée ou variante. Retrait et réordonnancement sont refusés sous le même verrou, même si le client conserve un ancien identifiant.
 
 ### Playback
 
@@ -89,11 +91,13 @@ Gère un bail exclusif sur le navigateur lecteur, les contrôles communs et la t
 
 Depuis `PLAYER-002`, cet identifiant est propre à l'onglet et conservé dans `sessionStorage` : un rechargement du même onglet conserve le bail, tandis qu'un second onglet du même navigateur reçoit une autre identité et reste silencieux. Le client ne crée l'IFrame YouTube que lorsque le snapshot personnalisé confirme `heldByCurrentDevice`; lorsqu'il perd ce droit, il applique `pause`, `mute`, puis détruit immédiatement le lecteur avant de retirer l'IFrame.
 
+En blind test, le snapshot personnalisé remplace le titre courant par son identifiant opaque et `addedByDisplayName`, supprime le titre des transitions et ne remet `provider` avec `providerTrackId` qu'au navigateur détenteur du bail. Le titre complet reste interne au service pour résoudre et faire progresser la lecture. L'IFrame YouTube du détenteur demeure visible et non recouverte ; les autres navigateurs ne créent aucun média.
+
 Les commandes `start`, `pause`, `resume` et `skip` sont ouvertes à tout membre tant qu'un bail valide existe. Seul le détenteur présentant navigateur et génération courants peut signaler `ended` ou `failed`. Fin, passage et échec archivent le titre courant puis démarrent atomiquement le prochain titre jouable ; un titre que l'adaptateur ne peut plus résoudre est marqué en échec et contourné. Chaque commande mutationnelle porte un reçu d'idempotence. Le fake conserve une instance de lecture séparée par lobby. Pour YouTube, le snapshot indique la variante publique au détenteur, qui crée l'IFrame visible et traduit l'état serveur en `playVideo` ou `pauseVideo` ; les événements du lecteur déclenchent les rapports autorisés.
 
 ## Modèle de données initial
 
-- `Lobby` : identifiant, nom, code unique, statut, expiration, dates.
+- `Lobby` : identifiant, nom, code unique, statut, réglage blind test, version, expiration, dates.
 - `Participant` : identifiant invité opaque, création et dernière activité. Le cookie signé référence cet identifiant, jamais un pseudonyme.
 - `Membership` : lobby, participant, pseudonyme dans ce lobby, indicateur de créateur, statut de présence logique. Sa clé composite ancre les autorisations et les références dans un lobby unique.
 - `ProviderConnection` : modèle persistant réservé aux futurs fournisseurs OAuth ; YouTube et le fake sont des sources virtuelles sans credential ni ligne par lobby dans le MVP.
@@ -111,7 +115,7 @@ La présence de jetons OAuth, la reprise après redémarrage et l'idempotence re
 - Créer une identité invitée UUID opaque dans un cookie HMAC-SHA-256 `HttpOnly`, `Secure` en production et `SameSite=Lax`. Sa signature et son expiration à 24 heures sont vérifiées avant chaque reprise ; une valeur expirée ou altérée est remplacée.
 - Ne pas utiliser le pseudonyme comme identité.
 - Vérifier l'appartenance au lobby sur chaque route et événement.
-- Distinguer appartenance au lobby, qualité de créateur et possession du bail lecteur. L'appartenance suffit pour les mutations ordinaires et commandes de lecture.
+- Distinguer appartenance au lobby, qualité de créateur et possession du bail lecteur. L'appartenance suffit pour les mutations ordinaires et commandes de lecture ; le créateur est requis pour la fermeture et le réglage blind test. Lorsque ce mode est actif, le serveur suspend retrait et réordonnancement pour tous sans créer de rôle supplémentaire.
 - L'appartenance au lobby suffit pour rechercher YouTube et commander la lecture EasyPlaylist ; aucune connexion de compte fournisseur n'est créée dans le MVP D-027.
 - Conserver le contrat OAuth générique pour un futur fournisseur, sans l'exposer tant qu'aucun parcours réel ne l'utilise.
 
@@ -131,14 +135,15 @@ Les contrats publics sont validés par les schémas Zod de `packages/contracts`.
 
 - `POST /lobbies` — crée atomiquement le lobby et le membership créateur pour l'identité invitée résolue depuis le cookie. L'entrée contient `name` et `displayName`.
 - `POST /lobbies/join` — rejoint par `code` et `displayName`. Le code est normalisé en majuscules ; les codes inconnus, fermés et expirés retournent tous `LOBBY_UNAVAILABLE` sans distinguer leur état.
-- `GET /lobbies/:id` — reprend l'état uniquement si l'identité invitée courante possède un membership actif dans ce lobby. Une absence ou un accès inter-lobby retourne le même `LOBBY_NOT_FOUND`.
+- `GET /lobbies/:id` — reprend l'état, sa version et `settings.blindTestEnabled` uniquement si l'identité invitée courante possède un membership actif dans ce lobby. Une absence ou un accès inter-lobby retourne le même `LOBBY_NOT_FOUND`.
+- `PATCH /lobbies/:id/settings` — applique `{ blindTestEnabled }` seulement pour le créateur ; une valeur identique est un no-op et un changement incrémente la version du lobby.
 - `GET /lobbies/:id/providers` — retourne les capacités et limites publiques des sources utilisables après vérification du membership ; aucun token, secret ou propriétaire interne n'est sérialisé. YouTube y apparaît configuré ou indisponible, et le fake reste explicitement identifié comme simulation.
 - `GET /lobbies/:id/search?q=` — recherche agrégée bornée après vérification du membership.
-- `GET /lobbies/:id/queue` — retourne un snapshot cohérent de la file et sa version après verrou partagé du lobby.
+- `GET /lobbies/:id/queue` — retourne après verrou partagé soit le snapshot détaillé normal, soit le compteur expurgé du blind test, avec la version du lobby.
 - `POST /lobbies/:id/queue/items` — ajoute un résultat provenant d'une connexion autorisée avec un identifiant de commande idempotent.
 - `DELETE /lobbies/:id/queue/items/:itemId` — retire un titre en tant que membre avec contrôle de version.
 - `PUT /lobbies/:id/queue/order` — soumet l'ordre complet des titres actifs avec contrôle de version et conflit observable.
-- `GET /lobbies/:id/player?deviceId=` — retourne l'état de lecture et une vue personnalisée du bail après autorisation du membership.
+- `GET /lobbies/:id/player?deviceId=` — retourne l'état de lecture, la version du lobby et une vue personnalisée du bail ; en blind test, seul le détenteur reçoit la source minimale de lecture.
 - `POST /lobbies/:id/player/claim` — réclame ou renouvelle explicitement le bail avec une commande idempotente.
 - `POST /lobbies/:id/player/heartbeat` — prolonge le bail seulement pour son navigateur et sa génération courants.
 - `POST /lobbies/:id/playback/:command` — soumet `start`, `pause`, `resume` ou `skip` en tant que membre.
@@ -165,7 +170,7 @@ Routes prévues pour les tranches suivantes :
 
 Le client lecteur émet séparément `playback:join`. `playback:event` ne contient que le lobby et la version de lecture : chaque navigateur relit ensuite `GET /player` avec son identifiant local pour calculer `heldByCurrentDevice` sans divulguer l'identifiant du détenteur aux autres membres. Les changements de titre publient aussi un snapshot de file après commit.
 
-`LOBBY-002` ajoute `lobby:event` avec le seul événement public `lobby.closed`. La fermeture et les mutations ordinaires se sérialisent sur la ligne du lobby : selon l'ordre du verrou, une action déjà engagée termine avant la fermeture ou reçoit ensuite `LOBBY_NOT_FOUND`, mais aucune action ne peut valider sur un lobby fermé. Le client remplace immédiatement l'écran actif par l'état de fin de soirée ; toute relecture HTTP, jonction Socket.IO ou nouvelle jonction est également refusée par le statut serveur.
+`LOBBY-002` ajoute `lobby:event` avec `lobby.closed`. `BLIND-001` ajoute `lobby.settings.updated`, qui contient seulement le réglage et la nouvelle version. Chaque client supprime immédiatement son état détaillé, recharge file et lecteur et ignore tout snapshot dont la version de lobby précède celle de la bascule. Une reconnexion récupère aussi le mode depuis le snapshot de file autoritaire. La fermeture, le réglage et les mutations ordinaires se sérialisent sur la ligne du lobby : selon l'ordre du verrou, une action déjà engagée termine avant la fermeture ou reçoit ensuite `LOBBY_NOT_FOUND`, mais aucune action ne peut valider sur un lobby fermé.
 
 ## Cycle de vie et purge
 

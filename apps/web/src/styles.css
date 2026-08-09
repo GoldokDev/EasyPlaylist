@@ -293,6 +293,28 @@ button:disabled {
   line-height: 1.45;
 }
 
+.creator-settings {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.lobby-actions--setting {
+  border-color: #52673a;
+  background: rgb(189 255 112 / 6%);
+}
+
+.blind-test-switch {
+  min-width: 7rem;
+  background: #30352a;
+  color: #d8dbd2;
+}
+
+.blind-test-switch[aria-checked="true"] {
+  background: #bdff70;
+  color: #151713;
+  box-shadow: 0 0 0 3px rgb(189 255 112 / 12%);
+}
+
 @media (min-width: 42rem) {
   .lobby-actions {
     grid-template-columns: 1fr auto;
@@ -331,6 +353,44 @@ button:disabled {
 .member-line {
   margin: 0.75rem 0 0;
   color: #b9bcb2;
+}
+
+.blind-test-banner {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #8a742e;
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at 90% 0%, rgb(255 218 91 / 14%), transparent 45%),
+    #242014;
+  color: #ffe8a8;
+}
+
+.blind-test-banner > span {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffda5b;
+  color: #211d10;
+  font-size: 1.2rem;
+  font-weight: 950;
+}
+
+.blind-test-banner div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.blind-test-banner span:not(:first-child),
+.blind-test-banner div > span {
+  color: #d8c992;
+  font-size: 0.82rem;
 }
 
 .lobby-overview {
@@ -605,6 +665,46 @@ button:disabled {
 .empty-queue p {
   margin: 0;
   line-height: 1.5;
+}
+
+.blind-queue {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1rem;
+  padding: 1.15rem;
+  border: 1px dashed #8a742e;
+  border-radius: 1.25rem;
+  background: rgb(255 218 91 / 5%);
+}
+
+.blind-queue__count {
+  display: grid;
+  width: 3.2rem;
+  height: 3.2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffda5b;
+  color: #211d10;
+  font-size: 1.25rem;
+  font-weight: 950;
+}
+
+.blind-queue h3,
+.blind-queue p {
+  margin: 0;
+}
+
+.blind-queue h3 {
+  color: #fff0b9;
+  font-size: 1rem;
+}
+
+.blind-queue p {
+  margin-top: 0.3rem;
+  color: #bdb38f;
+  line-height: 1.45;
 }
 
 .queue-panel {

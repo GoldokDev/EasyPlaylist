@@ -60,10 +60,21 @@ interface LeaseRow {
 
 interface PlaybackStateRow {
   current_item_id: string | null;
-  last_transition: PlayerSnapshot["lastTransition"];
+  last_transition: PlaybackTransition | null;
   position_ms: number;
   provider_command_id: string | null;
   state: "idle" | "paused" | "playing";
+  version: number | string;
+}
+
+interface PlaybackTransition {
+  at: string;
+  outcome: "ended" | "failed" | "skipped";
+  title: string;
+}
+
+interface LobbyPresentationRow {
+  blind_test_enabled: boolean;
   version: number | string;
 }
 
@@ -508,7 +519,7 @@ export class PlaybackService {
     client: PlaybackTransactionClient,
     lobbyId: string,
     providerCommandId: string,
-    previousTransition: PlayerSnapshot["lastTransition"],
+    previousTransition: PlaybackTransition | null,
   ): Promise<boolean> {
     let changed = false;
     let lastTransition = previousTransition;
@@ -631,30 +642,85 @@ export class PlaybackService {
   ): Promise<PlayerSnapshot> {
     const state = await this.readPlaybackState(client, lobbyId, false);
     const lease = await this.readLease(client, lobbyId, false);
+    const lobby = await this.readLobbyPresentation(client, lobbyId);
     const now = this.clock();
     const leaseIsActive = Boolean(lease && lease.expires_at > now);
-
-    return PlayerSnapshotSchema.parse({
-      currentItem: state.current_item_id
-        ? await this.readQueueItem(client, lobbyId, state.current_item_id)
-        : null,
-      lastTransition: state.last_transition,
+    const heldByCurrentDevice = Boolean(
+      leaseIsActive &&
+      lease?.holder_participant_id === participantId &&
+      lease.device_id === deviceId,
+    );
+    const currentItem = state.current_item_id
+      ? await this.readQueueItem(client, lobbyId, state.current_item_id)
+      : null;
+    const common = {
       lease: {
         expiresAt: leaseIsActive ? lease?.expires_at.toISOString() : null,
         generation: leaseIsActive ? Number(lease?.generation) : null,
-        heldByCurrentDevice: Boolean(
-          leaseIsActive &&
-          lease?.holder_participant_id === participantId &&
-          lease.device_id === deviceId,
-        ),
+        heldByCurrentDevice,
         holderDisplayName: leaseIsActive ? lease?.holder_display_name : null,
-        status: leaseIsActive ? "held" : "available",
+        status: leaseIsActive ? ("held" as const) : ("available" as const),
       },
       lobbyId,
+      lobbyVersion: Number(lobby.version),
       positionMs: state.position_ms,
       state: state.state,
       version: Number(state.version),
+    };
+
+    if (lobby.blind_test_enabled) {
+      const source =
+        heldByCurrentDevice && currentItem
+          ? this.options.getPlaybackSource(lobbyId, currentItem.track).candidate
+          : null;
+
+      return PlayerSnapshotSchema.parse({
+        ...common,
+        blindTestEnabled: true,
+        currentItem: currentItem
+          ? {
+              addedByDisplayName: currentItem.addedByDisplayName,
+              id: currentItem.id,
+            }
+          : null,
+        lastTransition: state.last_transition
+          ? {
+              at: state.last_transition.at,
+              outcome: state.last_transition.outcome,
+            }
+          : null,
+        playbackSource: source
+          ? {
+              provider: source.provider,
+              providerTrackId: source.providerTrackId,
+            }
+          : null,
+      });
+    }
+
+    return PlayerSnapshotSchema.parse({
+      ...common,
+      blindTestEnabled: false,
+      currentItem,
+      lastTransition: state.last_transition,
     });
+  }
+
+  private async readLobbyPresentation(
+    client: PlaybackTransactionClient,
+    lobbyId: string,
+  ): Promise<LobbyPresentationRow> {
+    const result = await client.query<LobbyPresentationRow>(
+      `SELECT blind_test_enabled, version FROM lobbies WHERE id = $1`,
+      [lobbyId],
+    );
+    const row = result.rows[0];
+
+    if (!row) {
+      throw new PlayerAccessError("Lobby player is not available");
+    }
+
+    return row;
   }
 
   private async readPlaybackState(
@@ -947,13 +1013,11 @@ function transition(
   item: QueueItem,
   outcome: "ended" | "failed" | "skipped",
   at: Date,
-): NonNullable<PlayerSnapshot["lastTransition"]> {
+): PlaybackTransition {
   return { at: at.toISOString(), outcome, title: item.track.title };
 }
 
-function serializeTransition(
-  value: PlayerSnapshot["lastTransition"],
-): string | null {
+function serializeTransition(value: PlaybackTransition | null): string | null {
   return value ? JSON.stringify(value) : null;
 }
 

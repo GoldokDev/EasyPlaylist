@@ -20,6 +20,9 @@ artifacts/validation/*
 !artifacts/validation/found-002-mobile.png
 !artifacts/validation/provider-003-youtube-real-failure.png
 !artifacts/validation/provider-003-youtube-real-player.png
+!artifacts/validation/blind-001-non-player-mobile.png
+!artifacts/validation/blind-001-player-desktop.png
+!artifacts/validation/blind-001-youtube-player-real.png
 !artifacts/validation/ux-001-lobby-desktop.png
 !artifacts/validation/ux-001-lobby-mobile.png
 !artifacts/validation/ux-001-settings-mobile.png

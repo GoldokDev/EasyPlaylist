@@ -35,6 +35,7 @@ describe("persistence foundation", () => {
         "001_initial_foundation.sql",
         "002_lobby_activity.sql",
         "003_playback_coordination.sql",
+        "004_blind_test_mode.sql",
       ]);
       expect(await runMigrations(database)).toEqual([]);
 
@@ -112,6 +113,10 @@ describe("persistence foundation", () => {
         WHERE id = '${lobbyA}'
       `);
       expect(Number(expiration.rows[0]?.hours)).toBeCloseTo(24, 6);
+      const blindTestSetting = await fixture.client.query<{
+        blind_test_enabled: boolean;
+      }>("SELECT blind_test_enabled FROM lobbies WHERE id = $1", [lobbyA]);
+      expect(blindTestSetting.rows).toEqual([{ blind_test_enabled: false }]);
     } finally {
       await fixture.cleanup();
     }
@@ -130,19 +135,22 @@ describe("persistence foundation", () => {
       expect(await runMigrations(database)).toEqual([
         "002_lobby_activity.sql",
         "003_playback_coordination.sql",
+        "004_blind_test_mode.sql",
       ]);
       const lobby = await fixture.client.query<{
         created_at: Date;
+        blind_test_enabled: boolean;
         last_activity_at: Date;
         name: string;
       }>(
-        "SELECT name, created_at, last_activity_at FROM lobbies WHERE code = 'U23456'",
+        "SELECT name, created_at, last_activity_at, blind_test_enabled FROM lobbies WHERE code = 'U23456'",
       );
 
       expect(lobby.rows[0]?.name).toBe("Upgrade lobby");
       expect(lobby.rows[0]?.last_activity_at.toISOString()).toBe(
         lobby.rows[0]?.created_at.toISOString(),
       );
+      expect(lobby.rows[0]?.blind_test_enabled).toBe(false);
     } finally {
       await fixture.cleanup();
     }

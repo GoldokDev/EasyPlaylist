@@ -5,9 +5,13 @@ import { chromium, expect } from "@playwright/test";
 
 const baseUrl =
   process.env.YOUTUBE_VALIDATION_BASE_URL ?? "http://127.0.0.1:5173";
+const blindTest = process.argv.includes("--blind-test");
 const headed = process.env.YOUTUBE_VALIDATION_HEADED !== "false";
 const artifactPath = resolve(
-  "artifacts/validation/provider-003-youtube-real-player.png",
+  "artifacts/validation",
+  blindTest
+    ? "blind-001-youtube-player-real.png"
+    : "provider-003-youtube-real-player.png",
 );
 
 await mkdir(resolve("artifacts/validation"), { recursive: true });
@@ -68,9 +72,31 @@ try {
     await expect(page.locator(".queue-list")).toContainText(title);
   }
 
+  if (blindTest) {
+    await page.locator(".lobby-settings > summary").click();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("switch", { name: "Mode blind test" }).click();
+    await expect(
+      page.getByRole("switch", { name: "Mode blind test" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(
+      page.getByText(`${selectedTitles.length} morceaux en attente`),
+    ).toBeVisible();
+
+    for (const title of selectedTitles) {
+      await expect(page.getByText(title)).toHaveCount(0);
+    }
+  }
+
   await page.getByRole("button", { name: "Devenir le lecteur" }).click();
   await expect(page.getByText("Cet appareil diffuse")).toBeVisible();
   await page.getByRole("button", { name: "Démarrer la file" }).click();
+
+  if (blindTest) {
+    await expect(
+      page.getByText("Musique de Lecteur de validation"),
+    ).toBeVisible();
+  }
 
   const iframe = page.locator(
     '.youtube-player iframe[src*="youtube.com/embed"]',
@@ -150,6 +176,14 @@ try {
     );
   }
 
+  const iframeBounds = await iframe.boundingBox();
+
+  if (!iframeBounds || iframeBounds.width < 200 || iframeBounds.height < 200) {
+    throw new Error(
+      `YouTube player is smaller than 200x200: ${JSON.stringify(iframeBounds)}`,
+    );
+  }
+
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect
     .poll(async () => (await readVideoState(video)).paused, { timeout: 10_000 })
@@ -165,6 +199,7 @@ try {
   await page.screenshot({ fullPage: true, path: artifactPath });
 
   const proof = {
+    blindTest,
     consoleErrors: parentConsoleErrors,
     duration: playing.duration,
     muted: playing.muted,
@@ -172,6 +207,7 @@ try {
     playingTitle,
     queuedTitles: selectedTitles,
     screenshot: artifactPath,
+    iframeBounds,
     attemptedTitles: [...attemptedTitles],
     timeAdvancedSeconds: Number(
       (playing.currentTime - before.currentTime).toFixed(2),

@@ -10,7 +10,7 @@ Lors d'une soirée, la musique dépend souvent du téléphone d'une personne, de
 
 ## Promesse
 
-Permettre à chacun de contribuer sans prendre le contrôle physique de l'enceinte, tout en donnant au groupe une file cohérente, visible et maîtrisable.
+Permettre à chacun de contribuer sans prendre le contrôle physique de l'enceinte, tout en donnant au groupe une file cohérente et maîtrisable. Le créateur peut choisir de rendre son contenu secret le temps d'un blind test.
 
 ## Piliers
 
@@ -20,7 +20,7 @@ Un lien ou un code, un pseudonyme, puis le lobby. Un compte EasyPlaylist permane
 
 ### Une file réellement partagée
 
-Les ajouts, suppressions, changements d'ordre et commandes de lecture sont ouverts à tous les membres et visibles en temps réel. Le serveur reste l'autorité sur la file ; un bail garantit qu'un seul navigateur produit l'audio.
+Les ajouts, suppressions, changements d'ordre et commandes de lecture sont ouverts à tous les membres et visibles en temps réel en mode normal. En blind test, les ajouts et commandes restent collaboratifs, mais la file devient un compteur secret et sa gestion détaillée est suspendue. Le serveur reste l'autorité sur la file et sa visibilité ; un bail garantit qu'un seul navigateur produit l'audio.
 
 ### Des fournisseurs extensibles, pas uniformisés de force
 
@@ -36,9 +36,9 @@ Les invités n'ont besoin d'aucun compte musical. Pour le MVP, YouTube fournit l
 
 ## Utilisateurs
 
-- Le créateur ouvre le lobby, partage l'invitation et peut fermer définitivement le lobby.
+- Le créateur ouvre le lobby, partage l'invitation, active éventuellement le blind test et peut fermer définitivement le lobby.
 - Le lecteur est le navigateur actif relié à l'enceinte ; n'importe quel membre peut réclamer ce bail lorsqu'il est disponible.
-- Le participant peut chercher des vidéos musicales YouTube publiques, ajouter, retirer, réordonner et piloter la lecture sans compte YouTube.
+- Le participant peut chercher des vidéos musicales YouTube publiques, ajouter et piloter la lecture sans compte YouTube. Il peut aussi retirer et réordonner tant que le blind test n'est pas actif.
 
 ## Résultat recherché
 

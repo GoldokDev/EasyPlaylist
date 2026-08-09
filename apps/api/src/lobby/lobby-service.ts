@@ -3,6 +3,7 @@ import { randomInt } from "node:crypto";
 import {
   LobbyResponseSchema,
   type LobbyResponse,
+  type UpdateLobbySettingsRequest,
 } from "@easyplaylist/contracts";
 
 interface LobbyQueryResult<Row> {
@@ -24,6 +25,7 @@ interface LobbyServiceOptions {
 }
 
 interface LobbyRow {
+  blind_test_enabled: boolean;
   code: string;
   created_at: Date;
   display_name: string;
@@ -34,6 +36,7 @@ interface LobbyRow {
   member_count: number | string;
   name: string;
   status: "open";
+  version: number | string;
 }
 
 interface CreateLobbyInput {
@@ -48,7 +51,13 @@ interface JoinLobbyInput {
   participantId: string;
 }
 
+export interface LobbySettingsUpdateResult {
+  changed: boolean;
+  lobby: LobbyResponse;
+}
+
 export class LobbyUnavailableError extends Error {}
+export class LobbySettingsCreatorRequiredError extends Error {}
 
 export class LobbyService {
   private readonly clock: () => Date;
@@ -83,7 +92,7 @@ export class LobbyService {
                 $3::timestamptz + make_interval(hours => $6::integer),
                 $3::timestamptz
               )
-              RETURNING id, name, code, status, created_at, expires_at
+              RETURNING id, blind_test_enabled, name, code, status, created_at, expires_at, version
             ), created_membership AS (
               INSERT INTO memberships (
                 lobby_id, participant_id, display_name, is_creator, joined_at
@@ -93,6 +102,7 @@ export class LobbyService {
             )
             SELECT
               lobby.id,
+              lobby.blind_test_enabled,
               lobby.name,
               lobby.code,
               lobby.status,
@@ -101,7 +111,8 @@ export class LobbyService {
               membership.display_name,
               membership.is_creator,
               membership.joined_at,
-              1::integer AS member_count
+              1::integer AS member_count,
+              lobby.version
             FROM created_lobby lobby
             JOIN created_membership membership ON membership.lobby_id = lobby.id
           `,
@@ -138,7 +149,7 @@ export class LobbyService {
           WHERE code = $1
             AND status = 'open'
             AND expires_at > $4::timestamptz
-          RETURNING id, name, code, status, created_at, expires_at
+          RETURNING id, blind_test_enabled, name, code, status, created_at, expires_at, version
         ), existing_membership AS (
           SELECT 1
           FROM memberships membership
@@ -156,6 +167,7 @@ export class LobbyService {
         )
         SELECT
           lobby.id,
+          lobby.blind_test_enabled,
           lobby.name,
           lobby.code,
           lobby.status,
@@ -164,6 +176,7 @@ export class LobbyService {
           membership.display_name,
           membership.is_creator,
           membership.joined_at,
+          lobby.version,
           (
             SELECT count(*)::integer +
               CASE WHEN EXISTS (SELECT 1 FROM existing_membership) THEN 0 ELSE 1 END
@@ -188,6 +201,7 @@ export class LobbyService {
       `
         SELECT
           lobby.id,
+          lobby.blind_test_enabled,
           lobby.name,
           lobby.code,
           lobby.status,
@@ -196,6 +210,7 @@ export class LobbyService {
           membership.display_name,
           membership.is_creator,
           membership.joined_at,
+          lobby.version,
           (
             SELECT count(*)::integer
             FROM memberships members
@@ -220,6 +235,63 @@ export class LobbyService {
     }
 
     return serializeLobby(result.rows[0]);
+  }
+
+  async updateSettings(
+    lobbyId: string,
+    participantId: string,
+    input: UpdateLobbySettingsRequest,
+  ): Promise<LobbySettingsUpdateResult> {
+    const now = this.clock();
+    const result = await this.options.database.query<LobbyRow>(
+      `
+        UPDATE lobbies lobby
+        SET blind_test_enabled = $3,
+            version = version + 1,
+            last_activity_at = $4
+        FROM memberships membership
+        WHERE lobby.id = $1
+          AND lobby.status = 'open'
+          AND lobby.expires_at > $4
+          AND lobby.blind_test_enabled IS DISTINCT FROM $3
+          AND membership.lobby_id = lobby.id
+          AND membership.participant_id = $2
+          AND membership.left_at IS NULL
+          AND membership.is_creator = true
+        RETURNING
+          lobby.id,
+          lobby.blind_test_enabled,
+          lobby.name,
+          lobby.code,
+          lobby.status,
+          lobby.created_at,
+          lobby.expires_at,
+          membership.display_name,
+          membership.is_creator,
+          membership.joined_at,
+          lobby.version,
+          (
+            SELECT count(*)::integer
+            FROM memberships members
+            WHERE members.lobby_id = lobby.id AND members.left_at IS NULL
+          ) AS member_count
+      `,
+      [lobbyId, participantId, input.blindTestEnabled, now],
+    );
+
+    if (result.rows[0]) {
+      return { changed: true, lobby: serializeLobby(result.rows[0]) };
+    }
+
+    const current = await this.get(lobbyId, participantId);
+
+    if (!current.membership.isCreator) {
+      throw new LobbySettingsCreatorRequiredError(
+        "Only the lobby creator can update its settings",
+      );
+    }
+
+    return { changed: false, lobby: current };
   }
 }
 
@@ -254,7 +326,9 @@ function serializeLobby(row: LobbyRow): LobbyResponse {
       joinedAt: row.joined_at.toISOString(),
     },
     name: row.name,
+    settings: { blindTestEnabled: row.blind_test_enabled },
     status: row.status,
+    version: Number(row.version),
   });
 }
 

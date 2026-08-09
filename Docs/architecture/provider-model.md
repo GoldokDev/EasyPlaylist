@@ -69,6 +69,8 @@ Lors de la lecture :
 4. conserver la vidéo et les contrôles officiels visibles ;
 5. sur fin ou erreur signalée par ce navigateur, archiver l'item et passer au suivant.
 
+En blind test, cette remise est séparée des métadonnées publiques : le détenteur reçoit uniquement `provider` et `providerTrackId` dans `playbackSource`, tandis que les autres membres reçoivent `null`. Le navigateur lecteur reste susceptible de voir la réponse dans l'IFrame YouTube officielle, qui ne peut être masquée ou recouverte ; aucun autre appareil ne reçoit l'identifiant vidéo.
+
 Tout membre peut rechercher et demander la lecture sans compte fournisseur. `YOUTUBE_API_KEY` reste une configuration serveur globale et n'est ni une connexion participant ni un credential de lecture. `DISC-002` et D-027 bornent ce parcours aux vidéos publiques YouTube intégrables ; YouTube Music, l'audio isolé et la lecture masquée restent hors contrat.
 
 ## Recherche agrégée

@@ -40,7 +40,7 @@ Les questions structurantes de `DISC-001` ont été tranchées le 2026-08-08. Ce
 ## Q-006 — Droits dans le lobby
 
 - Question : faut-il réserver la modération ou les contrôles à certains rôles ?
-- Décision : non pour le MVP. Tous les membres peuvent ajouter, retirer, réordonner, réclamer l'appareil lecteur et envoyer des commandes de lecture.
+- Décision : non pour le MVP. Tous les membres peuvent ajouter, réclamer l'appareil lecteur et envoyer des commandes de lecture. Ils peuvent retirer et réordonner en mode normal ; D-031 suspend ces deux actions lorsque le blind test cache structurellement la file.
 - Garde-fou : le bail garantit qu'un seul navigateur produit l'audio. La fermeture définitive du lobby reste réservée à son créateur afin d'éviter une suppression accidentelle par un invité.
 - Suite : des politiques de permissions configurables sont prévues en V2.
 - Statut : `RESOLVED`.

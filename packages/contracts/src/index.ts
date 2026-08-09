@@ -59,6 +59,18 @@ export const LobbyIdParameterSchema = z.object({
   id: z.uuid(),
 });
 
+export const LobbySettingsSchema = z.object({
+  blindTestEnabled: z.boolean(),
+});
+
+export type LobbySettings = z.infer<typeof LobbySettingsSchema>;
+
+export const UpdateLobbySettingsRequestSchema = LobbySettingsSchema;
+
+export type UpdateLobbySettingsRequest = z.infer<
+  typeof UpdateLobbySettingsRequestSchema
+>;
+
 export const LobbyResponseSchema = z.object({
   code: LobbyCodeSchema,
   createdAt: z.iso.datetime(),
@@ -72,7 +84,9 @@ export const LobbyResponseSchema = z.object({
     joinedAt: z.iso.datetime(),
   }),
   name: LobbyNameSchema,
+  settings: LobbySettingsSchema,
   status: z.literal("open"),
+  version: z.number().int().nonnegative(),
 });
 
 export type LobbyResponse = z.infer<typeof LobbyResponseSchema>;
@@ -85,10 +99,18 @@ export const CloseLobbyResponseSchema = z.object({
 
 export type CloseLobbyResponse = z.infer<typeof CloseLobbyResponseSchema>;
 
-export const LobbyRealtimeEventSchema = z.object({
-  lobbyId: z.uuid(),
-  type: z.literal("lobby.closed"),
-});
+export const LobbyRealtimeEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    lobbyId: z.uuid(),
+    type: z.literal("lobby.closed"),
+  }),
+  z.object({
+    lobbyId: z.uuid(),
+    settings: LobbySettingsSchema,
+    type: z.literal("lobby.settings.updated"),
+    version: z.number().int().nonnegative(),
+  }),
+]);
 
 export type LobbyRealtimeEvent = z.infer<typeof LobbyRealtimeEventSchema>;
 
@@ -202,12 +224,26 @@ export const QueueItemSchema = z.object({
 
 export type QueueItem = z.infer<typeof QueueItemSchema>;
 
-export const QueueSnapshotSchema = z.object({
+export const StandardQueueSnapshotSchema = z.object({
+  blindTestEnabled: z.literal(false),
   generatedAt: z.iso.datetime(),
   items: z.array(QueueItemSchema).max(200),
   lobbyId: z.uuid(),
   version: QueueVersionSchema,
 });
+
+export const BlindTestQueueSnapshotSchema = z.object({
+  blindTestEnabled: z.literal(true),
+  generatedAt: z.iso.datetime(),
+  lobbyId: z.uuid(),
+  queuedCount: z.number().int().nonnegative().max(200),
+  version: QueueVersionSchema,
+});
+
+export const QueueSnapshotSchema = z.discriminatedUnion("blindTestEnabled", [
+  StandardQueueSnapshotSchema,
+  BlindTestQueueSnapshotSchema,
+]);
 
 export type QueueSnapshot = z.infer<typeof QueueSnapshotSchema>;
 
@@ -272,7 +308,33 @@ export type QueueRealtimeEvent = z.infer<typeof QueueRealtimeEventSchema>;
 
 export const PlayerDeviceIdSchema = z.string().uuid();
 
-export const PlayerSnapshotSchema = z.object({
+const PlayerLeaseSchema = z.object({
+  expiresAt: z.iso.datetime().nullable(),
+  generation: z.number().int().positive().nullable(),
+  heldByCurrentDevice: z.boolean(),
+  holderDisplayName: DisplayNameSchema.nullable(),
+  status: z.enum(["available", "held"]),
+});
+
+const PlayerSnapshotCommonShape = {
+  lease: PlayerLeaseSchema,
+  lobbyId: z.uuid(),
+  lobbyVersion: z.number().int().nonnegative(),
+  positionMs: z.number().int().nonnegative(),
+  state: z.enum(["idle", "playing", "paused"]),
+  version: z.number().int().nonnegative(),
+};
+
+export const PlayerPlaybackSourceSchema = z.object({
+  provider: z.string().min(1).max(40),
+  providerTrackId: z.string().min(1).max(300),
+});
+
+export type PlayerPlaybackSource = z.infer<typeof PlayerPlaybackSourceSchema>;
+
+export const StandardPlayerSnapshotSchema = z.object({
+  ...PlayerSnapshotCommonShape,
+  blindTestEnabled: z.literal(false),
   currentItem: QueueItemSchema.nullable(),
   lastTransition: z
     .object({
@@ -281,18 +343,30 @@ export const PlayerSnapshotSchema = z.object({
       title: z.string().min(1).max(300),
     })
     .nullable(),
-  lease: z.object({
-    expiresAt: z.iso.datetime().nullable(),
-    generation: z.number().int().positive().nullable(),
-    heldByCurrentDevice: z.boolean(),
-    holderDisplayName: DisplayNameSchema.nullable(),
-    status: z.enum(["available", "held"]),
-  }),
-  lobbyId: z.uuid(),
-  positionMs: z.number().int().nonnegative(),
-  state: z.enum(["idle", "playing", "paused"]),
-  version: z.number().int().nonnegative(),
 });
+
+export const BlindTestPlayerSnapshotSchema = z.object({
+  ...PlayerSnapshotCommonShape,
+  blindTestEnabled: z.literal(true),
+  currentItem: z
+    .object({
+      addedByDisplayName: DisplayNameSchema,
+      id: z.uuid(),
+    })
+    .nullable(),
+  lastTransition: z
+    .object({
+      at: z.iso.datetime(),
+      outcome: z.enum(["ended", "failed", "skipped"]),
+    })
+    .nullable(),
+  playbackSource: PlayerPlaybackSourceSchema.nullable(),
+});
+
+export const PlayerSnapshotSchema = z.discriminatedUnion("blindTestEnabled", [
+  StandardPlayerSnapshotSchema,
+  BlindTestPlayerSnapshotSchema,
+]);
 
 export type PlayerSnapshot = z.infer<typeof PlayerSnapshotSchema>;
 

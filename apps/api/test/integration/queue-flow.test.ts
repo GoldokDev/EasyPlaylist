@@ -1,6 +1,8 @@
 import { Pool, type PoolClient } from "pg";
 import { describe, expect, it } from "vitest";
 
+import type { QueueSnapshot } from "@easyplaylist/contracts";
+
 import {
   runMigrations,
   type MigrationDatabase,
@@ -76,7 +78,7 @@ describe("collaborative queue on PostgreSQL", () => {
         replayed: true,
         snapshot: { version: 1 },
       });
-      expect(replay.snapshot.items).toHaveLength(1);
+      expect(visibleQueue(replay.snapshot).items).toHaveLength(1);
 
       await expect(
         queueService.add(lobbyA, participantA, {
@@ -105,9 +107,8 @@ describe("collaborative queue on PostgreSQL", () => {
         [2, 3],
       );
 
-      const beforeConflict = await queueService.getSnapshot(
-        lobbyA,
-        participantA,
+      const beforeConflict = visibleQueue(
+        await queueService.getSnapshot(lobbyA, participantA),
       );
       const orderA = beforeConflict.items.map(({ id }) => id).reverse();
       const orderB = [
@@ -147,9 +148,12 @@ describe("collaborative queue on PostgreSQL", () => {
           Awaited<ReturnType<QueueService["reorder"]>>
         >
       ).value;
-      const resumed = await queueService.getSnapshot(lobbyA, participantA);
+      const winnerSnapshot = visibleQueue(winner.snapshot);
+      const resumed = visibleQueue(
+        await queueService.getSnapshot(lobbyA, participantA),
+      );
       expect(resumed.items.map(({ id }) => id)).toEqual(
-        winner.snapshot.items.map(({ id }) => id),
+        winnerSnapshot.items.map(({ id }) => id),
       );
 
       const removed = await queueService.remove(
@@ -161,20 +165,22 @@ describe("collaborative queue on PostgreSQL", () => {
           expectedVersion: resumed.version,
         },
       );
-      expect(removed.snapshot.items).toHaveLength(2);
-      expect(removed.snapshot.version).toBe(5);
+      const removedSnapshot = visibleQueue(removed.snapshot);
+      expect(removedSnapshot.items).toHaveLength(2);
+      expect(removedSnapshot.version).toBe(5);
       const reorderedAfterRemoval = await queueService.reorder(
         lobbyA,
         participantA,
         {
           commandId: "019c28d1-0000-4000-8000-000000000008",
-          expectedVersion: removed.snapshot.version,
-          itemIds: removed.snapshot.items.map(({ id }) => id).reverse(),
+          expectedVersion: removedSnapshot.version,
+          itemIds: removedSnapshot.items.map(({ id }) => id).reverse(),
         },
       );
-      expect(reorderedAfterRemoval.snapshot.version).toBe(6);
-      expect(reorderedAfterRemoval.snapshot.items.map(({ id }) => id)).toEqual(
-        removed.snapshot.items.map(({ id }) => id).reverse(),
+      const reorderedSnapshot = visibleQueue(reorderedAfterRemoval.snapshot);
+      expect(reorderedSnapshot.version).toBe(6);
+      expect(reorderedSnapshot.items.map(({ id }) => id)).toEqual(
+        removedSnapshot.items.map(({ id }) => id).reverse(),
       );
 
       await expect(
@@ -201,6 +207,16 @@ describe("collaborative queue on PostgreSQL", () => {
     }
   });
 });
+
+function visibleQueue(
+  snapshot: QueueSnapshot,
+): Extract<QueueSnapshot, { blindTestEnabled: false }> {
+  if (snapshot.blindTestEnabled) {
+    throw new Error("Expected a visible queue snapshot");
+  }
+
+  return snapshot;
+}
 
 function trackFor(lobbyId: string, id: string, title: string) {
   return {

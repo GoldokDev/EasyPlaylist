@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp, type DatabaseClient } from "./app.js";
 import type { GuestIdentityManager } from "./identity/guest-identity.js";
-import { LobbyUnavailableError } from "./lobby/lobby-service.js";
+import {
+  LobbySettingsCreatorRequiredError,
+  LobbyUnavailableError,
+} from "./lobby/lobby-service.js";
 import { QueueConflictError } from "./queue/queue-service.js";
 
 const openApps: Array<ReturnType<typeof buildApp>> = [];
@@ -52,7 +55,9 @@ const publicLobby = {
     joinedAt: "2026-08-08T12:00:00.000Z",
   },
   name: "Anniversaire",
+  settings: { blindTestEnabled: false },
   status: "open" as const,
+  version: 0,
 };
 
 function createLobbyService() {
@@ -60,6 +65,14 @@ function createLobbyService() {
     create: vi.fn().mockResolvedValue(publicLobby),
     get: vi.fn().mockResolvedValue(publicLobby),
     join: vi.fn().mockResolvedValue(publicLobby),
+    updateSettings: vi.fn().mockResolvedValue({
+      changed: true,
+      lobby: {
+        ...publicLobby,
+        settings: { blindTestEnabled: true },
+        version: 1,
+      },
+    }),
   };
 }
 
@@ -123,6 +136,7 @@ const queueTrack = {
 };
 
 const queueSnapshot = {
+  blindTestEnabled: false as const,
   generatedAt: "2026-08-08T12:00:00.000Z",
   items: [
     {
@@ -375,6 +389,63 @@ describe("lobby routes", () => {
       message: "The request contains invalid fields",
     });
     expect(guestIdentity.resolve).not.toHaveBeenCalled();
+  });
+
+  it("lets the creator enable blind test mode through a validated setting", async () => {
+    const lobbyService = createLobbyService();
+    const app = buildApp({
+      database: createDatabase(),
+      guestIdentity: createGuestIdentity(),
+      lobbyService,
+      loggerStream: silentLogger,
+      providerCatalog: createProviderCatalog(),
+    });
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "PATCH",
+      payload: { blindTestEnabled: true },
+      url: `/lobbies/${publicLobby.id}/settings`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      settings: { blindTestEnabled: true },
+      version: 1,
+    });
+    expect(lobbyService.updateSettings).toHaveBeenCalledWith(
+      publicLobby.id,
+      "019c28ce-66d7-7733-a38c-f7aefb572429",
+      { blindTestEnabled: true },
+    );
+  });
+
+  it("returns a bounded forbidden response for a non-creator setting update", async () => {
+    const lobbyService = createLobbyService();
+    lobbyService.updateSettings.mockRejectedValue(
+      new LobbySettingsCreatorRequiredError("private detail"),
+    );
+    const app = buildApp({
+      database: createDatabase(),
+      guestIdentity: createGuestIdentity(),
+      lobbyService,
+      loggerStream: silentLogger,
+      providerCatalog: createProviderCatalog(),
+    });
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "PATCH",
+      payload: { blindTestEnabled: true },
+      url: `/lobbies/${publicLobby.id}/settings`,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      code: "LOBBY_CREATOR_REQUIRED",
+      message: "Only the lobby creator can update its settings",
+    });
+    expect(response.body).not.toContain("private detail");
   });
 });
 

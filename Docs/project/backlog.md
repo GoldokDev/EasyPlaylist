@@ -29,9 +29,10 @@ Priorités :
 | 13 | LOBBY-002 | P0 | DONE | QUEUE-001, PLAYER-001 | reconnexion, expiration et fermeture/purge |
 | 14 | UX-001 | P0 | DONE | QUEUE-001, PLAYER-001, PROVIDER-003 | interface du lobby recentrée sur la lecture et la file |
 | 15 | PLAYER-002 | P0 | DONE | PLAYER-001, PROVIDER-003 | tout appareil qui rejoint sans détenir le bail reste silencieux |
-| 16 | DEPLOY-001 | P0 | VERIFY | FOUND-001, PROVIDER-003, LOBBY-002 | Compose sûr derrière Caddy sur un sous-domaine HTTPS |
-| 17 | SEC-001 | P0 | READY | PROVIDER-003, LOBBY-002 | qualification sécurité et résilience |
-| 18 | QA-001 | P0 | TODO | UX-001, PLAYER-002, DEPLOY-001, SEC-001 | candidat MVP démontrable à trois appareils |
+| 16 | DEPLOY-001 | P0 | DONE | FOUND-001, PROVIDER-003, LOBBY-002 | Compose sûr derrière Caddy sur un sous-domaine HTTPS |
+| 17 | BLIND-001 | P0 | DONE | UX-001, PLAYER-002, PROVIDER-003 | mode blind test activable et sans fuite de métadonnées |
+| 18 | SEC-001 | P0 | READY | PROVIDER-003, LOBBY-002, BLIND-001 | qualification sécurité et résilience |
+| 19 | QA-001 | P0 | TODO | UX-001, PLAYER-002, DEPLOY-001, BLIND-001, SEC-001 | candidat MVP démontrable à trois appareils |
 
 ## Cadrage
 
@@ -221,6 +222,20 @@ Critères d'acceptation :
 - Après un ajout réussi, le résultat concerné change visuellement d'état et une confirmation textuelle est annoncée aux technologies d'assistance.
 - Les erreurs, états de chargement, temps réel dégradé, bail lecteur et contraintes du lecteur YouTube restent visibles au moment utile.
 - Un parcours navigateur exerce ouverture des réglages, copie, ajout confirmé et fermeture, avec captures mobile et bureau examinées.
+
+### BLIND-001 — Mode blind test
+
+Objectif : permettre au créateur de transformer à tout moment le lobby en blind test sans exposer la file ni les métadonnées de lecture aux participants non lecteurs.
+
+Critères d'acceptation :
+
+- Le créateur active ou désactive un réglage persistant, désactivé par défaut, et tous les membres observent immédiatement le mode courant après mutation, reconnexion ou rechargement.
+- En mode blind test, les snapshots HTTP et temps réel de file exposent uniquement le nombre de morceaux en attente ; aucun identifiant, auteur, titre, artiste, album, miniature, durée ou identifiant fournisseur n'est sérialisé.
+- Le retrait et le réordonnancement sont refusés côté serveur pendant le blind test, y compris avec un identifiant obtenu avant son activation ; l'ajout et les commandes de lecture restent ouverts à tous.
+- Le titre courant devient « Musique de {pseudonyme} » et les transitions restent génériques. Seul le navigateur détenteur du bail reçoit l'identifiant fournisseur minimal et conserve l'IFrame YouTube officielle visible.
+- L'interface signale clairement le mode, remplace la file par un compteur, efface recherche et confirmation détaillée après ajout et ne place aucune métadonnée cachée dans les libellés accessibles.
+- Les bascules avec file ou lecture active sont sérialisées avec les mutations du lobby ; les clients ignorent les snapshots antérieurs à la version de réglage observée.
+- Les contrats, migrations, autorisations, échecs, reconnexions et parcours à trois navigateurs sont testés, avec captures mobile et bureau examinées et preuve d'absence de fuite.
 
 ## Stabilisation
 

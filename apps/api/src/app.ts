@@ -30,6 +30,7 @@ import {
   AddQueueItemRequestSchema,
   RemoveQueueItemRequestSchema,
   ReorderQueueRequestSchema,
+  UpdateLobbySettingsRequestSchema,
 } from "@easyplaylist/contracts";
 import Fastify, { LogController } from "fastify";
 import { Server as SocketServer } from "socket.io";
@@ -41,6 +42,7 @@ import {
   type LobbyLifecycleService,
 } from "./lobby/lobby-lifecycle-service.js";
 import {
+  LobbySettingsCreatorRequiredError,
   LobbyUnavailableError,
   type LobbyService,
 } from "./lobby/lobby-service.js";
@@ -65,7 +67,10 @@ interface BuildAppOptions {
   database: DatabaseClient;
   guestIdentity: GuestIdentityManager;
   lobbyLifecycleService?: Pick<LobbyLifecycleService, "close">;
-  lobbyService: Pick<LobbyService, "create" | "get" | "join">;
+  lobbyService: Pick<
+    LobbyService,
+    "create" | "get" | "join" | "updateSettings"
+  >;
   loggerStream?: LoggerStreamDestination;
   providerCatalog: Pick<ProviderCatalog, "listForLobby" | "searchForLobby"> &
     Partial<Pick<ProviderCatalog, "purgeLobby">>;
@@ -373,6 +378,67 @@ export function buildApp({
         ApiErrorResponseSchema.parse({
           code: "LOBBY_SERVICE_UNAVAILABLE",
           message: "Lobby retrieval is temporarily unavailable",
+        }),
+      );
+    }
+  });
+
+  app.patch("/lobbies/:id/settings", async (request, reply) => {
+    const parsedParameters = LobbyIdParameterSchema.safeParse(request.params);
+    const parsedBody = UpdateLobbySettingsRequestSchema.safeParse(request.body);
+
+    if (!parsedParameters.success || !parsedBody.success) {
+      return invalidRequest(reply);
+    }
+
+    try {
+      const identity = await guestIdentity.resolve(request.headers.cookie);
+      const result = await lobbyService.updateSettings(
+        parsedParameters.data.id,
+        identity.participantId,
+        parsedBody.data,
+      );
+
+      if (result.changed) {
+        realtime.to(queueRoom(parsedParameters.data.id)).emit(
+          "lobby:event",
+          LobbyRealtimeEventSchema.parse({
+            lobbyId: result.lobby.id,
+            settings: result.lobby.settings,
+            type: "lobby.settings.updated",
+            version: result.lobby.version,
+          }),
+        );
+      }
+
+      return LobbyResponseSchema.parse(result.lobby);
+    } catch (error) {
+      if (error instanceof LobbySettingsCreatorRequiredError) {
+        return reply.code(403).send(
+          ApiErrorResponseSchema.parse({
+            code: "LOBBY_CREATOR_REQUIRED",
+            message: "Only the lobby creator can update its settings",
+          }),
+        );
+      }
+
+      if (error instanceof LobbyUnavailableError) {
+        return reply.code(404).send(
+          ApiErrorResponseSchema.parse({
+            code: "LOBBY_NOT_FOUND",
+            message: "This lobby is not available",
+          }),
+        );
+      }
+
+      app.log.warn(
+        { errorCode: readErrorCode(error) },
+        "Lobby settings update failed",
+      );
+      return reply.code(503).send(
+        ApiErrorResponseSchema.parse({
+          code: "LOBBY_SERVICE_UNAVAILABLE",
+          message: "Lobby settings are temporarily unavailable",
         }),
       );
     }
@@ -969,6 +1035,8 @@ function playerConflictMessage(code: PlayerConflictError["code"]): string {
 
 function queueConflictMessage(code: QueueConflictError["code"]): string {
   return {
+    BLIND_TEST_QUEUE_HIDDEN:
+      "The queue cannot be managed while blind test mode is enabled",
     IDEMPOTENCY_KEY_REUSED: "This command identifier was already used",
     QUEUE_FULL: "The queue is full",
     QUEUE_ITEM_NOT_FOUND: "This queue item is not available",

@@ -105,7 +105,9 @@ describe("lobby contracts", () => {
         },
         name: "Anniversaire",
         participantId: "must-not-leak",
+        settings: { blindTestEnabled: false },
         status: "open",
+        version: 0,
       }),
     ).not.toHaveProperty("participantId");
   });
@@ -153,6 +155,7 @@ describe("queue contracts", () => {
   it("strips secrets from queue snapshots at every nested level", () => {
     const snapshot = QueueSnapshotSchema.parse({
       accessToken: "top-secret",
+      blindTestEnabled: false,
       generatedAt: "2026-08-08T12:00:00.000Z",
       items: [
         {
@@ -179,6 +182,35 @@ describe("queue contracts", () => {
       /top-secret|track-secret|variant-secret|accessToken|refreshToken/,
     );
   });
+
+  it("makes blind-test queue metadata structurally impossible to serialize", () => {
+    const snapshot = QueueSnapshotSchema.parse({
+      blindTestEnabled: true,
+      generatedAt: "2026-08-08T12:00:00.000Z",
+      items: [
+        {
+          addedByDisplayName: "Camille",
+          id: "019c28cf-66d7-4733-a38c-f7aefb572429",
+          track,
+        },
+      ],
+      lobbyId: "019c28ce-66d7-4733-a38c-f7aefb572429",
+      queuedCount: 1,
+      title: "Midnight Relay",
+      version: 2,
+    });
+
+    expect(snapshot).toEqual({
+      blindTestEnabled: true,
+      generatedAt: "2026-08-08T12:00:00.000Z",
+      lobbyId: "019c28ce-66d7-4733-a38c-f7aefb572429",
+      queuedCount: 1,
+      version: 2,
+    });
+    expect(JSON.stringify(snapshot)).not.toMatch(
+      /Midnight Relay|Camille|fake:track|items|title/,
+    );
+  });
 });
 
 describe("player contracts", () => {
@@ -202,6 +234,7 @@ describe("player contracts", () => {
   it("strips device and credential fields from playback snapshots", () => {
     const snapshot = PlayerSnapshotSchema.parse({
       accessToken: "top-secret",
+      blindTestEnabled: false,
       currentItem: null,
       deviceId: "private-device",
       lastTransition: null,
@@ -215,6 +248,7 @@ describe("player contracts", () => {
         status: "available",
       },
       lobbyId: "019c28ce-66d7-4733-a38c-f7aefb572429",
+      lobbyVersion: 0,
       positionMs: 0,
       state: "idle",
       version: 0,
@@ -223,6 +257,43 @@ describe("player contracts", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(
       /deviceId|accessToken|refreshToken|private-device|secret/,
     );
+  });
+
+  it("accepts only an author clue and generic transition in blind test mode", () => {
+    const snapshot = PlayerSnapshotSchema.parse({
+      blindTestEnabled: true,
+      currentItem: {
+        addedByDisplayName: "Adil",
+        id: "019c28cf-66d7-4733-a38c-f7aefb572429",
+        track: { title: "Midnight Relay" },
+      },
+      lastTransition: {
+        at: "2026-08-08T12:00:00.000Z",
+        outcome: "ended",
+        title: "Previous secret",
+      },
+      lease: {
+        expiresAt: null,
+        generation: null,
+        heldByCurrentDevice: false,
+        holderDisplayName: null,
+        status: "available",
+      },
+      lobbyId: "019c28ce-66d7-4733-a38c-f7aefb572429",
+      lobbyVersion: 3,
+      playbackSource: null,
+      positionMs: 0,
+      state: "idle",
+      version: 1,
+    });
+
+    expect(JSON.stringify(snapshot)).not.toMatch(
+      /Midnight Relay|Previous secret|track|title/,
+    );
+    expect(snapshot.currentItem).toEqual({
+      addedByDisplayName: "Adil",
+      id: "019c28cf-66d7-4733-a38c-f7aefb572429",
+    });
   });
 });
 

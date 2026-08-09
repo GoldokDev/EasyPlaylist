@@ -1,6 +1,8 @@
 import { Pool, type PoolClient } from "pg";
 import { describe, expect, it } from "vitest";
 
+import type { QueueSnapshot } from "@easyplaylist/contracts";
+
 import {
   PLAYER_LEASE_DURATION_MS,
   PlaybackService,
@@ -121,7 +123,9 @@ describe("player lease and fake playback on PostgreSQL", () => {
           deviceId: noorDevice,
         }),
       ).resolves.toMatchObject({ replayed: true });
-      expect((await queue.getSnapshot(lobbyId, noor)).items).toHaveLength(3);
+      expect(
+        visibleQueue(await queue.getSnapshot(lobbyId, noor)).items,
+      ).toHaveLength(3);
 
       await expect(
         playback.control(lobbyId, noor, "pause", {
@@ -203,6 +207,16 @@ describe("player lease and fake playback on PostgreSQL", () => {
     }
   });
 });
+
+function visibleQueue(
+  snapshot: QueueSnapshot,
+): Extract<QueueSnapshot, { blindTestEnabled: false }> {
+  if (snapshot.blindTestEnabled) {
+    throw new Error("Expected a visible queue snapshot");
+  }
+
+  return snapshot;
+}
 
 function trackFor(lobbyId: string, id: string, title: string) {
   return {

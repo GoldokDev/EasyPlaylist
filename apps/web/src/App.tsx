@@ -48,6 +48,7 @@ export function App() {
   const [copied, setCopied] = useState(false);
   const [closedLobbyName, setClosedLobbyName] = useState<string>();
   const [closingLobby, setClosingLobby] = useState(false);
+  const [updatingSettings, setUpdatingSettings] = useState(false);
   const [routeVersion, setRouteVersion] = useState(0);
 
   const inviteCode = useMemo(
@@ -215,6 +216,88 @@ export function App() {
     }
   }
 
+  async function updateBlindTest(blindTestEnabled: boolean) {
+    if (!lobby || updatingSettings) {
+      return;
+    }
+
+    if (blindTestEnabled) {
+      let hasActivity = true;
+
+      try {
+        const deviceId = getPlayerDeviceId();
+        const [queueResponse, playerResponse] = await Promise.all([
+          fetch(`/api/lobbies/${lobby.id}/queue`),
+          fetch(
+            `/api/lobbies/${lobby.id}/player?deviceId=${encodeURIComponent(deviceId)}`,
+          ),
+        ]);
+        const queue = QueueSnapshotSchema.parse(await queueResponse.json());
+        const player = PlayerSnapshotSchema.parse(await playerResponse.json());
+        hasActivity =
+          (queue.blindTestEnabled
+            ? queue.queuedCount > 0
+            : queue.items.length > 0) || player.currentItem !== null;
+      } catch {
+        hasActivity = true;
+      }
+
+      if (
+        hasActivity &&
+        !window.confirm(
+          "Activer le blind test maintenant ? Les morceaux déjà vus ne pourront pas redevenir secrets.",
+        )
+      ) {
+        return;
+      }
+    } else if (
+      !window.confirm(
+        "Désactiver le blind test ? Le titre courant et toute la file seront de nouveau visibles.",
+      )
+    ) {
+      return;
+    }
+
+    setUpdatingSettings(true);
+    setError(undefined);
+
+    try {
+      const nextLobby = await requestLobby(
+        `/api/lobbies/${lobby.id}/settings`,
+        {
+          body: JSON.stringify({ blindTestEnabled }),
+          headers: { "content-type": "application/json" },
+          method: "PATCH",
+        },
+      );
+      setLobby(nextLobby);
+    } catch (requestError) {
+      setError(messageForError(requestError));
+    } finally {
+      setUpdatingSettings(false);
+    }
+  }
+
+  const observeLobbySettings = useCallback(
+    (blindTestEnabled: boolean, version: number) => {
+      setLobby((current) => {
+        if (
+          !current ||
+          current.settings.blindTestEnabled === blindTestEnabled
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          settings: { blindTestEnabled },
+          version,
+        };
+      });
+    },
+    [],
+  );
+
   if (loadingLobby) {
     return (
       <main className="shell shell--centered">
@@ -293,22 +376,50 @@ export function App() {
                 </div>
 
                 {lobby.membership.isCreator ? (
-                  <div className="lobby-actions">
-                    <div>
-                      <strong>Fermer la soirée</strong>
-                      <span>
-                        Cette action est définitive et supprime les connexions
-                        musicales.
-                      </span>
+                  <div className="creator-settings">
+                    <div className="lobby-actions lobby-actions--setting">
+                      <div>
+                        <strong>Mode blind test</strong>
+                        <span>
+                          Cache la file et les morceaux à tous sauf au lecteur
+                          YouTube qui diffuse.
+                        </span>
+                      </div>
+                      <button
+                        aria-checked={lobby.settings.blindTestEnabled}
+                        aria-label="Mode blind test"
+                        className="blind-test-switch"
+                        disabled={updatingSettings}
+                        role="switch"
+                        type="button"
+                        onClick={() =>
+                          void updateBlindTest(!lobby.settings.blindTestEnabled)
+                        }
+                      >
+                        {updatingSettings
+                          ? "Mise à jour…"
+                          : lobby.settings.blindTestEnabled
+                            ? "Activé"
+                            : "Désactivé"}
+                      </button>
                     </div>
-                    <button
-                      className="danger-button"
-                      disabled={closingLobby}
-                      type="button"
-                      onClick={() => void closeLobby()}
-                    >
-                      {closingLobby ? "Fermeture…" : "Fermer le lobby"}
-                    </button>
+                    <div className="lobby-actions">
+                      <div>
+                        <strong>Fermer la soirée</strong>
+                        <span>
+                          Cette action est définitive et supprime les connexions
+                          musicales.
+                        </span>
+                      </div>
+                      <button
+                        className="danger-button"
+                        disabled={closingLobby}
+                        type="button"
+                        onClick={() => void closeLobby()}
+                      >
+                        {closingLobby ? "Fermeture…" : "Fermer le lobby"}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -321,9 +432,23 @@ export function App() {
             </p>
           ) : null}
 
+          {lobby.settings.blindTestEnabled ? (
+            <div className="blind-test-banner" role="status">
+              <span aria-hidden="true">?</span>
+              <div>
+                <strong>Mode blind test</strong>
+                <span>Les morceaux restent secrets. À vous de jouer !</span>
+              </div>
+            </div>
+          ) : null}
+
           <CollaborativeQueue
+            blindTestEnabled={lobby.settings.blindTestEnabled}
+            key={lobby.settings.blindTestEnabled ? "blind" : "standard"}
             lobbyId={lobby.id}
+            minimumLobbyVersion={lobby.version}
             onLobbyClosed={showClosedLobby}
+            onLobbySettingsObserved={observeLobbySettings}
           />
         </section>
       </main>
@@ -427,11 +552,17 @@ export function App() {
 }
 
 function CollaborativeQueue({
+  blindTestEnabled,
   lobbyId,
+  minimumLobbyVersion,
   onLobbyClosed,
+  onLobbySettingsObserved,
 }: {
+  blindTestEnabled: boolean;
   lobbyId: string;
+  minimumLobbyVersion: number;
   onLobbyClosed: () => void;
+  onLobbySettingsObserved: (blindTestEnabled: boolean, version: number) => void;
 }) {
   const [snapshot, setSnapshot] = useState<QueueSnapshot>();
   const [realtimeState, setRealtimeState] = useState<
@@ -441,7 +572,7 @@ function CollaborativeQueue({
   const [addingTrackId, setAddingTrackId] = useState<string>();
   const [addedTrack, setAddedTrack] = useState<{
     id: string;
-    title: string;
+    title?: string;
   }>();
   const [pendingItemId, setPendingItemId] = useState<string>();
   const addFeedbackTimerRef = useRef<number | undefined>(undefined);
@@ -468,7 +599,8 @@ function CollaborativeQueue({
 
         const next = QueueSnapshotSchema.parse(await response.json());
 
-        if (active) {
+        if (active && next.version >= minimumLobbyVersion) {
+          onLobbySettingsObserved(next.blindTestEnabled, next.version);
           setSnapshot(next);
           setError(undefined);
         }
@@ -504,6 +636,15 @@ function CollaborativeQueue({
         return;
       }
 
+      if (parsed.data.snapshot.version < minimumLobbyVersion) {
+        return;
+      }
+
+      onLobbySettingsObserved(
+        parsed.data.snapshot.blindTestEnabled,
+        parsed.data.snapshot.version,
+      );
+
       setSnapshot((current) => {
         if (
           current &&
@@ -525,7 +666,14 @@ function CollaborativeQueue({
       const parsed = LobbyRealtimeEventSchema.safeParse(payload);
 
       if (parsed.success && parsed.data.lobbyId === lobbyId) {
-        onLobbyClosed();
+        if (parsed.data.type === "lobby.closed") {
+          onLobbyClosed();
+        } else {
+          onLobbySettingsObserved(
+            parsed.data.settings.blindTestEnabled,
+            parsed.data.version,
+          );
+        }
       }
     });
     const handleOffline = () => {
@@ -548,7 +696,7 @@ function CollaborativeQueue({
       window.removeEventListener("online", handleOnline);
       socket.disconnect();
     };
-  }, [lobbyId, onLobbyClosed]);
+  }, [lobbyId, minimumLobbyVersion, onLobbyClosed, onLobbySettingsObserved]);
 
   async function mutateQueue(
     path: string,
@@ -596,7 +744,10 @@ function CollaborativeQueue({
         commandId: crypto.randomUUID(),
         track,
       });
-      setAddedTrack({ id: track.id, title: track.title });
+      setAddedTrack({
+        id: track.id,
+        ...(blindTestEnabled ? {} : { title: track.title }),
+      });
 
       if (addFeedbackTimerRef.current !== undefined) {
         window.clearTimeout(addFeedbackTimerRef.current);
@@ -606,8 +757,10 @@ function CollaborativeQueue({
         () => setAddedTrack(undefined),
         4_000,
       );
+      return true;
     } catch (mutationError) {
       setError(readQueueMutationError(mutationError));
+      return false;
     } finally {
       setAddingTrackId(undefined);
     }
@@ -637,7 +790,7 @@ function CollaborativeQueue({
   }
 
   async function moveItem(itemId: string, direction: -1 | 1) {
-    if (!snapshot) {
+    if (!snapshot || snapshot.blindTestEnabled) {
       return;
     }
 
@@ -670,7 +823,10 @@ function CollaborativeQueue({
 
   return (
     <>
-      <PlayerPanel lobbyId={lobbyId} />
+      <PlayerPanel
+        lobbyId={lobbyId}
+        minimumLobbyVersion={minimumLobbyVersion}
+      />
 
       <section className="queue-panel" aria-labelledby="queue-title">
         <div className="queue-heading">
@@ -702,6 +858,21 @@ function CollaborativeQueue({
           <p className="queue-loading" role="status">
             Chargement de la file…
           </p>
+        ) : snapshot.blindTestEnabled ? (
+          <div className="blind-queue" role="status">
+            <span className="blind-queue__count" aria-hidden="true">
+              {snapshot.queuedCount}
+            </span>
+            <div>
+              <h3>
+                {snapshot.queuedCount}{" "}
+                {snapshot.queuedCount > 1
+                  ? "morceaux en attente"
+                  : "morceau en attente"}
+              </h3>
+              <p>La file est secrète pendant le blind test.</p>
+            </div>
+          </div>
         ) : snapshot.items.length === 0 ? (
           <div className="empty-queue">
             <span aria-hidden="true">♫</span>
@@ -763,6 +934,7 @@ function CollaborativeQueue({
       <SearchPanel
         addedTrack={addedTrack}
         addingTrackId={addingTrackId}
+        blindTestEnabled={snapshot?.blindTestEnabled ?? blindTestEnabled}
         lobbyId={lobbyId}
         onAdd={addTrack}
       />
@@ -770,15 +942,23 @@ function CollaborativeQueue({
   );
 }
 
-function PlayerPanel({ lobbyId }: { lobbyId: string }) {
+function PlayerPanel({
+  lobbyId,
+  minimumLobbyVersion,
+}: {
+  lobbyId: string;
+  minimumLobbyVersion: number;
+}) {
   const deviceId = useMemo(() => getPlayerDeviceId(), []);
   const [snapshot, setSnapshot] = useState<PlayerSnapshot>();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
   const reportedTransitionRef = useRef<string | undefined>(undefined);
-  const playbackVariant = snapshot?.currentItem?.track.variants.find(
-    (variant) => variant.playbackAvailability === "playable",
-  );
+  const playbackSource = snapshot?.blindTestEnabled
+    ? snapshot.playbackSource
+    : snapshot?.currentItem?.track.variants.find(
+        (variant) => variant.playbackAvailability === "playable",
+      );
 
   async function loadSnapshot() {
     try {
@@ -790,7 +970,13 @@ function PlayerPanel({ lobbyId }: { lobbyId: string }) {
         throw new Error("Player unavailable");
       }
 
-      setSnapshot(PlayerSnapshotSchema.parse(await response.json()));
+      const next = PlayerSnapshotSchema.parse(await response.json());
+
+      if (next.lobbyVersion < minimumLobbyVersion) {
+        return;
+      }
+
+      setSnapshot(next);
       setError(undefined);
     } catch {
       setError("Le lecteur est momentanément indisponible.");
@@ -814,7 +1000,7 @@ function PlayerPanel({ lobbyId }: { lobbyId: string }) {
       window.clearInterval(polling);
       socket.disconnect();
     };
-  }, [deviceId, lobbyId]);
+  }, [deviceId, lobbyId, minimumLobbyVersion]);
 
   useEffect(() => {
     if (
@@ -951,9 +1137,19 @@ function PlayerPanel({ lobbyId }: { lobbyId: string }) {
             ▶
           </span>
           <div>
-            <span className="field-label">Titre courant</span>
-            <strong>{snapshot.currentItem.track.title}</strong>
-            <small>{snapshot.currentItem.track.artists.join(", ")}</small>
+            <span className="field-label">
+              {snapshot.blindTestEnabled ? "Morceau secret" : "Titre courant"}
+            </span>
+            {snapshot.blindTestEnabled ? (
+              <strong>
+                Musique de {snapshot.currentItem.addedByDisplayName}
+              </strong>
+            ) : (
+              <>
+                <strong>{snapshot.currentItem.track.title}</strong>
+                <small>{snapshot.currentItem.track.artists.join(", ")}</small>
+              </>
+            )}
           </div>
           <span className="playback-state">
             {snapshot.state === "paused" ? "En pause" : "En lecture"}
@@ -965,8 +1161,10 @@ function PlayerPanel({ lobbyId }: { lobbyId: string }) {
 
       {snapshot?.lastTransition ? (
         <p className="player-transition" role="status">
-          {transitionLabel(snapshot.lastTransition.outcome)} :{" "}
-          {snapshot.lastTransition.title}
+          {transitionLabel(snapshot.lastTransition.outcome)}
+          {!snapshot.blindTestEnabled
+            ? ` : ${snapshot.lastTransition.title}`
+            : null}
         </p>
       ) : null}
 
@@ -1026,11 +1224,11 @@ function PlayerPanel({ lobbyId }: { lobbyId: string }) {
 
       {snapshot?.lease.heldByCurrentDevice &&
       snapshot.currentItem &&
-      playbackVariant?.provider === "youtube" ? (
+      playbackSource?.provider === "youtube" ? (
         <YoutubePlayer
-          key={playbackVariant.providerTrackId}
+          key={playbackSource.providerTrackId}
           playbackState={snapshot.state === "paused" ? "paused" : "playing"}
-          videoId={playbackVariant.providerTrackId}
+          videoId={playbackSource.providerTrackId}
           onEnded={() => void report("ended")}
           onFailed={() => void report("failed")}
         />
@@ -1038,7 +1236,7 @@ function PlayerPanel({ lobbyId }: { lobbyId: string }) {
 
       {snapshot?.lease.heldByCurrentDevice &&
       snapshot.currentItem &&
-      playbackVariant?.provider === "fake" ? (
+      playbackSource?.provider === "fake" ? (
         <div
           className="simulation-actions"
           aria-label="Simulation du lecteur fake"
@@ -1081,14 +1279,17 @@ function readQueueMutationError(error: unknown): string {
 function SearchPanel({
   addedTrack,
   addingTrackId,
+  blindTestEnabled,
   lobbyId,
   onAdd,
 }: {
-  addedTrack?: { id: string; title: string };
+  addedTrack?: { id: string; title?: string };
   addingTrackId?: string;
+  blindTestEnabled: boolean;
   lobbyId: string;
-  onAdd: (track: CatalogSearchResponse["results"][number]) => Promise<void>;
+  onAdd: (track: CatalogSearchResponse["results"][number]) => Promise<boolean>;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [response, setResponse] = useState<CatalogSearchResponse>();
   const [state, setState] = useState<"idle" | "loading" | "unavailable">(
     "idle",
@@ -1125,6 +1326,15 @@ function SearchPanel({
     }
   }
 
+  async function addResult(result: CatalogSearchResponse["results"][number]) {
+    const added = await onAdd(result);
+
+    if (added && blindTestEnabled) {
+      setResponse(undefined);
+      formRef.current?.reset();
+    }
+  }
+
   return (
     <section className="search-panel" aria-labelledby="search-title">
       <div className="search-heading">
@@ -1135,7 +1345,7 @@ function SearchPanel({
         <span className="search-limit">10 résultats max.</span>
       </div>
 
-      <form className="search-form" onSubmit={handleSearch}>
+      <form className="search-form" ref={formRef} onSubmit={handleSearch}>
         <label>
           <span className="sr-only">Titre, artiste ou album</span>
           <input
@@ -1155,7 +1365,13 @@ function SearchPanel({
       {addedTrack ? (
         <p className="queue-add-feedback" role="status">
           <span aria-hidden="true">✓</span>
-          <strong>{addedTrack.title}</strong> ajouté à la file
+          {blindTestEnabled ? (
+            <strong>Ton morceau a été ajouté</strong>
+          ) : (
+            <>
+              <strong>{addedTrack.title}</strong> ajouté à la file
+            </>
+          )}
         </p>
       ) : null}
 
@@ -1213,7 +1429,7 @@ function SearchPanel({
                 className={`track-add-button${addedTrack?.id === result.id ? " track-add-button--added" : ""}`}
                 disabled={addingTrackId !== undefined}
                 type="button"
-                onClick={() => void onAdd(result)}
+                onClick={() => void addResult(result)}
               >
                 {addingTrackId === result.id
                   ? "Ajout…"

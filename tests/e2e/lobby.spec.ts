@@ -560,6 +560,191 @@ test("creates, shares, joins and resumes a lobby on mobile", async ({
   await invalidContext.close();
 });
 
+test("keeps a blind test secret across three browsers and reconnects", async ({
+  browser,
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const watchConsole = (target: typeof page) => {
+    target.on("console", (message) => {
+      if (message.type() === "error") {
+        consoleErrors.push(message.text());
+      }
+    });
+  };
+  watchConsole(page);
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.goto("/");
+  await page.getByLabel("Nom de la soirée").fill("Blind test du salon");
+  await page
+    .locator(".entry-card--primary")
+    .getByLabel("Votre pseudonyme")
+    .fill("Camille");
+  await page.getByRole("button", { name: "Créer et inviter" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Blind test du salon" }),
+  ).toBeVisible();
+  const lobbyId = new URL(page.url()).pathname.split("/").at(-1)!;
+  expect(lobbyId).toMatch(/^[0-9a-f-]{36}$/);
+  await page.locator(".lobby-settings > summary").click();
+  const inviteUrl = await page.locator(".invite-url").innerText();
+
+  const memberContext = await browser.newContext({
+    viewport: { height: 844, width: 390 },
+  });
+  const memberPage = await memberContext.newPage();
+  watchConsole(memberPage);
+  await memberPage.goto(inviteUrl);
+  await memberPage
+    .locator(".entry-card:not(.entry-card--primary)")
+    .getByLabel("Votre pseudonyme")
+    .fill("Adil");
+  await memberPage.getByRole("button", { name: "Rejoindre le lobby" }).click();
+
+  const observerContext = await browser.newContext({
+    viewport: { height: 844, width: 390 },
+  });
+  const observerPage = await observerContext.newPage();
+  watchConsole(observerPage);
+  await observerPage.goto(inviteUrl);
+  await observerPage
+    .locator(".entry-card:not(.entry-card--primary)")
+    .getByLabel("Votre pseudonyme")
+    .fill("Noor");
+  await observerPage
+    .getByRole("button", { name: "Rejoindre le lobby" })
+    .click();
+
+  const searchResponse = await memberPage.request.get(
+    `/api/lobbies/${lobbyId}/search?q=round&limit=2`,
+  );
+  const tracks = ((await searchResponse.json()) as { results: CatalogTrack[] })
+    .results;
+  const firstTitle = tracks[0]!.title;
+  for (const track of tracks) {
+    const addition = await memberPage.request.post(
+      `/api/lobbies/${lobbyId}/queue/items`,
+      { data: { commandId: randomUUID(), track } },
+    );
+    expect(addition.status()).toBe(201);
+  }
+  const visibleQueue = (await (
+    await memberPage.request.get(`/api/lobbies/${lobbyId}/queue`)
+  ).json()) as QueueSnapshotPayload;
+  const cachedItemId = visibleQueue.items[1]!.id;
+  await expect(page.getByText(firstTitle).first()).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("switch", { name: "Mode blind test" }).click();
+  await expect(
+    page.getByRole("switch", { name: "Mode blind test" }),
+  ).toHaveAttribute("aria-checked", "true");
+  for (const currentPage of [page, memberPage, observerPage]) {
+    await expect(currentPage.getByText("Mode blind test").last()).toBeVisible();
+    await expect(currentPage.getByText("2 morceaux en attente")).toBeVisible();
+    await expect(currentPage.getByText(firstTitle)).toHaveCount(0);
+  }
+  await expect(
+    observerPage.getByRole("switch", { name: "Mode blind test" }),
+  ).toHaveCount(0);
+
+  const hiddenQueueResponse = await memberPage.request.get(
+    `/api/lobbies/${lobbyId}/queue`,
+  );
+  const hiddenQueuePayload = (await hiddenQueueResponse.json()) as {
+    version: number;
+  };
+  const hiddenQueueBody = JSON.stringify(hiddenQueuePayload);
+  expect(hiddenQueueBody).not.toMatch(
+    /round|Adil|fake:|items|title|artists|album|imageUrl|durationMs|providerTrackId/i,
+  );
+  const cachedRemoval = await memberPage.request.delete(
+    `/api/lobbies/${lobbyId}/queue/items/${cachedItemId}`,
+    {
+      data: {
+        commandId: randomUUID(),
+        expectedVersion: hiddenQueuePayload.version,
+      },
+    },
+  );
+  expect(cachedRemoval.status()).toBe(409);
+  expect(await cachedRemoval.json()).toMatchObject({
+    code: "BLIND_TEST_QUEUE_HIDDEN",
+  });
+
+  await memberPage.getByLabel("Titre, artiste ou album").fill("surprise");
+  await memberPage.getByRole("button", { name: "Rechercher" }).click();
+  const secretResult = memberPage.locator(".search-results > li").first();
+  const addedSecretTitle = await secretResult.locator("strong").innerText();
+  await secretResult.getByRole("button", { name: "Ajouter à la file" }).click();
+  await expect(memberPage.getByText("Ton morceau a été ajouté")).toBeVisible();
+  await expect(
+    memberPage.getByRole("list", { name: "Résultats de recherche" }),
+  ).toHaveCount(0);
+  await expect(memberPage.getByText(addedSecretTitle)).toHaveCount(0);
+  await expect(observerPage.getByText("3 morceaux en attente")).toBeVisible();
+
+  await page.getByRole("button", { name: "Devenir le lecteur" }).click();
+  await memberPage.getByRole("button", { name: "Démarrer la file" }).click();
+  for (const currentPage of [page, memberPage, observerPage]) {
+    await expect(currentPage.getByText("Musique de Adil")).toBeVisible();
+    await expect(currentPage.getByText(firstTitle)).toHaveCount(0);
+    await expect(currentPage.getByText("2 morceaux en attente")).toBeVisible();
+  }
+  await expect(page.getByLabel("Simulation du lecteur fake")).toBeVisible();
+  await expect(
+    observerPage.getByLabel("Simulation du lecteur fake"),
+  ).toHaveCount(0);
+  const observerDeviceId = await observerPage.evaluate(() =>
+    window.sessionStorage.getItem("easyplaylist.playerDeviceId"),
+  );
+  const observerPlayer = await observerPage.request.get(
+    `/api/lobbies/${lobbyId}/player?deviceId=${observerDeviceId}`,
+  );
+  const observerPlayerBody = await observerPlayer.text();
+  expect(observerPlayerBody).toContain('"addedByDisplayName":"Adil"');
+  expect(observerPlayerBody).not.toMatch(
+    /round|fake:|"title"|"artists"|"album"|"imageUrl"|"durationMs"|"providerTrackId"/i,
+  );
+
+  const artifactDirectory = resolve("artifacts/validation");
+  await mkdir(artifactDirectory, { recursive: true });
+  await observerPage.screenshot({
+    fullPage: true,
+    path: resolve(artifactDirectory, "blind-001-non-player-mobile.png"),
+  });
+  await page.setViewportSize({ height: 900, width: 1280 });
+  await page.screenshot({
+    fullPage: true,
+    path: resolve(artifactDirectory, "blind-001-player-desktop.png"),
+  });
+
+  await observerPage.reload();
+  await expect(observerPage.getByText("Mode blind test").last()).toBeVisible();
+  await expect(observerPage.getByText("Musique de Adil")).toBeVisible();
+  await expect(observerPage.getByText(firstTitle)).toHaveCount(0);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("switch", { name: "Mode blind test" }).click();
+  await expect(observerPage.getByText("Mode blind test")).toHaveCount(0);
+  await expect(observerPage.getByText(firstTitle)).toBeVisible();
+  await expect(
+    observerPage.getByRole("list", { name: "File musicale" }),
+  ).toContainText(addedSecretTitle);
+
+  for (const currentPage of [page, memberPage, observerPage]) {
+    const dimensions = await currentPage.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(dimensions.scrollWidth).toBe(dimensions.clientWidth);
+  }
+  expect(consoleErrors).toEqual([]);
+
+  await memberContext.close();
+  await observerContext.close();
+});
+
 interface CatalogTrack {
   album: string;
   artists: string[];

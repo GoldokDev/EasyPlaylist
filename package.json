@@ -27,6 +27,7 @@
     "test:failure-probe:verify": "node scripts/verify-failure-probe.mjs",
     "test:postgres": "node scripts/run-postgres-tests.mjs",
     "validate:youtube-real": "node scripts/validate-youtube-real.mjs",
+    "validate:youtube-blind-real": "node scripts/validate-youtube-real.mjs --blind-test",
     "typecheck": "npm run typecheck -w @easyplaylist/contracts && npm run typecheck -w @easyplaylist/api && npm run typecheck -w @easyplaylist/web && tsc -p tsconfig.tests.json --noEmit",
     "dev:api": "npm run dev -w @easyplaylist/api",
     "dev:web": "npm run dev -w @easyplaylist/web"

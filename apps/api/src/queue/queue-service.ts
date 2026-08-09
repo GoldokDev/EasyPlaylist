@@ -36,8 +36,14 @@ interface QueueServiceOptions {
   ) => Promise<boolean>;
 }
 
-interface LobbyVersionRow {
+interface LobbyQueueStateRow {
+  blind_test_enabled: boolean;
   version: number | string;
+}
+
+interface LobbyQueueState {
+  blindTestEnabled: boolean;
+  version: number;
 }
 
 interface QueueItemRow {
@@ -55,6 +61,7 @@ interface ReceiptRow {
 }
 
 type QueueConflictCode =
+  | "BLIND_TEST_QUEUE_HIDDEN"
   | "IDEMPOTENCY_KEY_REUSED"
   | "QUEUE_FULL"
   | "QUEUE_ITEM_NOT_FOUND"
@@ -86,13 +93,13 @@ export class QueueService {
     participantId: string,
   ): Promise<QueueSnapshot> {
     return this.withTransaction(async (client) => {
-      const version = await this.lockAuthorizedLobby(
+      const lobby = await this.lockAuthorizedLobby(
         client,
         lobbyId,
         participantId,
         "share",
       );
-      return this.readSnapshot(client, lobbyId, version);
+      return this.readSnapshot(client, lobbyId, lobby);
     });
   }
 
@@ -106,7 +113,7 @@ export class QueueService {
     });
 
     return this.withTransaction(async (client) => {
-      const version = await this.lockAuthorizedLobby(
+      const lobby = await this.lockAuthorizedLobby(
         client,
         lobbyId,
         participantId,
@@ -119,7 +126,7 @@ export class QueueService {
         input.commandId,
         "queue.add",
         fingerprint,
-        version,
+        lobby,
       );
 
       if (replay) {
@@ -129,7 +136,7 @@ export class QueueService {
       await this.requireExpectedVersion(
         client,
         lobbyId,
-        version,
+        lobby,
         input.expectedVersion,
       );
 
@@ -137,7 +144,7 @@ export class QueueService {
         throw new QueueConflictError(
           "TRACK_NOT_AUTHORIZED",
           "The track does not come from an authorized lobby connection",
-          await this.readSnapshot(client, lobbyId, version),
+          await this.readSnapshot(client, lobbyId, lobby),
         );
       }
 
@@ -154,7 +161,7 @@ export class QueueService {
         throw new QueueConflictError(
           "QUEUE_FULL",
           "The queue already contains the maximum number of items",
-          await this.readSnapshot(client, lobbyId, version),
+          await this.readSnapshot(client, lobbyId, lobby),
         );
       }
 
@@ -193,7 +200,10 @@ export class QueueService {
         ],
       );
 
-      const snapshot = await this.readSnapshot(client, lobbyId, nextVersion);
+      const snapshot = await this.readSnapshot(client, lobbyId, {
+        ...lobby,
+        version: nextVersion,
+      });
       await this.writeReceipt(
         client,
         lobbyId,
@@ -216,7 +226,7 @@ export class QueueService {
     const fingerprint = fingerprintCommand("queue.remove", { itemId });
 
     return this.withTransaction(async (client) => {
-      const version = await this.lockAuthorizedLobby(
+      const lobby = await this.lockAuthorizedLobby(
         client,
         lobbyId,
         participantId,
@@ -229,7 +239,7 @@ export class QueueService {
         input.commandId,
         "queue.remove",
         fingerprint,
-        version,
+        lobby,
       );
 
       if (replay) {
@@ -239,9 +249,10 @@ export class QueueService {
       await this.requireExpectedVersion(
         client,
         lobbyId,
-        version,
+        lobby,
         input.expectedVersion,
       );
+      await this.requireVisibleQueue(client, lobbyId, lobby);
       const removed = await client.query<{ id: string }>(
         `
           UPDATE queue_items
@@ -256,12 +267,15 @@ export class QueueService {
         throw new QueueConflictError(
           "QUEUE_ITEM_NOT_FOUND",
           "The queue item is not available",
-          await this.readSnapshot(client, lobbyId, version),
+          await this.readSnapshot(client, lobbyId, lobby),
         );
       }
 
       const nextVersion = await this.incrementVersion(client, lobbyId);
-      const snapshot = await this.readSnapshot(client, lobbyId, nextVersion);
+      const snapshot = await this.readSnapshot(client, lobbyId, {
+        ...lobby,
+        version: nextVersion,
+      });
       await this.writeReceipt(
         client,
         lobbyId,
@@ -285,7 +299,7 @@ export class QueueService {
     });
 
     return this.withTransaction(async (client) => {
-      const version = await this.lockAuthorizedLobby(
+      const lobby = await this.lockAuthorizedLobby(
         client,
         lobbyId,
         participantId,
@@ -298,7 +312,7 @@ export class QueueService {
         input.commandId,
         "queue.reorder",
         fingerprint,
-        version,
+        lobby,
       );
 
       if (replay) {
@@ -308,9 +322,10 @@ export class QueueService {
       await this.requireExpectedVersion(
         client,
         lobbyId,
-        version,
+        lobby,
         input.expectedVersion,
       );
+      await this.requireVisibleQueue(client, lobbyId, lobby);
       const currentIds = await client.query<{ id: string }>(
         `
           SELECT id
@@ -330,7 +345,7 @@ export class QueueService {
         throw new QueueConflictError(
           "QUEUE_ITEM_SET_CONFLICT",
           "The submitted order does not match the current queue",
-          await this.readSnapshot(client, lobbyId, version),
+          await this.readSnapshot(client, lobbyId, lobby),
         );
       }
 
@@ -348,7 +363,10 @@ export class QueueService {
         [lobbyId, input.itemIds, nextVersion, this.clock()],
       );
 
-      const snapshot = await this.readSnapshot(client, lobbyId, nextVersion);
+      const snapshot = await this.readSnapshot(client, lobbyId, {
+        ...lobby,
+        version: nextVersion,
+      });
       await this.writeReceipt(
         client,
         lobbyId,
@@ -367,10 +385,10 @@ export class QueueService {
     lobbyId: string,
     participantId: string,
     lock: "share" | "update",
-  ): Promise<number> {
-    const result = await client.query<LobbyVersionRow>(
+  ): Promise<LobbyQueueState> {
+    const result = await client.query<LobbyQueueStateRow>(
       `
-        SELECT lobby.version
+        SELECT lobby.blind_test_enabled, lobby.version
         FROM lobbies lobby
         JOIN memberships membership
           ON membership.lobby_id = lobby.id
@@ -388,23 +406,26 @@ export class QueueService {
       throw new QueueAccessError("Lobby queue is not available");
     }
 
-    return Number(result.rows[0].version);
+    return {
+      blindTestEnabled: result.rows[0].blind_test_enabled,
+      version: Number(result.rows[0].version),
+    };
   }
 
   private async requireExpectedVersion(
     client: QueueTransactionClient,
     lobbyId: string,
-    currentVersion: number,
+    lobby: LobbyQueueState,
     expectedVersion: number | undefined,
   ) {
-    if (expectedVersion === undefined || expectedVersion === currentVersion) {
+    if (expectedVersion === undefined || expectedVersion === lobby.version) {
       return;
     }
 
     throw new QueueConflictError(
       "QUEUE_VERSION_CONFLICT",
       "The queue changed before this command was applied",
-      await this.readSnapshot(client, lobbyId, currentVersion),
+      await this.readSnapshot(client, lobbyId, lobby),
     );
   }
 
@@ -415,7 +436,7 @@ export class QueueService {
     commandId: string,
     commandType: string,
     fingerprint: string,
-    version: number,
+    lobby: LobbyQueueState,
   ): Promise<QueueMutationResponse | undefined> {
     const result = await client.query<ReceiptRow>(
       `
@@ -439,13 +460,13 @@ export class QueueService {
       throw new QueueConflictError(
         "IDEMPOTENCY_KEY_REUSED",
         "The command identifier was already used for another command",
-        await this.readSnapshot(client, lobbyId, version),
+        await this.readSnapshot(client, lobbyId, lobby),
       );
     }
 
     return QueueMutationResponseSchema.parse({
       replayed: true,
-      snapshot: await this.readSnapshot(client, lobbyId, version),
+      snapshot: await this.readSnapshot(client, lobbyId, lobby),
     });
   }
 
@@ -453,7 +474,7 @@ export class QueueService {
     client: QueueTransactionClient,
     lobbyId: string,
   ): Promise<number> {
-    const result = await client.query<LobbyVersionRow>(
+    const result = await client.query<LobbyQueueStateRow>(
       `
         UPDATE lobbies
         SET version = version + 1, last_activity_at = $2
@@ -474,8 +495,27 @@ export class QueueService {
   private async readSnapshot(
     client: QueueTransactionClient,
     lobbyId: string,
-    version: number,
+    lobby: LobbyQueueState,
   ): Promise<QueueSnapshot> {
+    if (lobby.blindTestEnabled) {
+      const countResult = await client.query<{ item_count: number | string }>(
+        `
+          SELECT count(*)::integer AS item_count
+          FROM queue_items
+          WHERE lobby_id = $1 AND state = 'queued'
+        `,
+        [lobbyId],
+      );
+
+      return QueueSnapshotSchema.parse({
+        blindTestEnabled: true,
+        generatedAt: this.clock().toISOString(),
+        lobbyId,
+        queuedCount: Number(countResult.rows[0]?.item_count ?? 0),
+        version: lobby.version,
+      });
+    }
+
     const result = await client.query<QueueItemRow>(
       `
         SELECT
@@ -495,6 +535,7 @@ export class QueueService {
     );
 
     return QueueSnapshotSchema.parse({
+      blindTestEnabled: false,
       generatedAt: this.clock().toISOString(),
       items: result.rows.map((row) => ({
         addedAt: row.created_at.toISOString(),
@@ -506,8 +547,22 @@ export class QueueService {
         },
       })),
       lobbyId,
-      version,
+      version: lobby.version,
     });
+  }
+
+  private async requireVisibleQueue(
+    client: QueueTransactionClient,
+    lobbyId: string,
+    lobby: LobbyQueueState,
+  ) {
+    if (lobby.blindTestEnabled) {
+      throw new QueueConflictError(
+        "BLIND_TEST_QUEUE_HIDDEN",
+        "The queue cannot be managed while blind test mode is enabled",
+        await this.readSnapshot(client, lobbyId, lobby),
+      );
+    }
   }
 
   private async writeReceipt(
