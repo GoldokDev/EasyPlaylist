@@ -1,0 +1,5 @@
+name: easyplaylist-test
+
+networks:
+  backend:
+    internal: false

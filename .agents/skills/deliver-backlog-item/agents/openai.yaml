@@ -1,0 +1,4 @@
+interface:
+  display_name: "Livrer un item du backlog"
+  short_description: "Livrer un item web de bout en bout"
+  default_prompt: "Use $deliver-backlog-item to deliver the next ready backlog item end to end."

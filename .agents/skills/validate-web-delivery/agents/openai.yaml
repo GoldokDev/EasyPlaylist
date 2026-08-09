@@ -1,0 +1,4 @@
+interface:
+  display_name: "Valider une livraison web"
+  short_description: "Tester le web, l'API et Docker avec preuves"
+  default_prompt: "Use $validate-web-delivery to verify the current web delivery and report evidence."

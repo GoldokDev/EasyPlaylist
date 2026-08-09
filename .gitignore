@@ -1,0 +1,39 @@
+# Dependencies and builds
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Test and validation artifacts
+artifacts/validation/*
+!artifacts/validation/.gitkeep
+!artifacts/validation/found-001-mobile.png
+!artifacts/validation/found-002-mobile.png
+!artifacts/validation/provider-003-youtube-real-failure.png
+!artifacts/validation/provider-003-youtube-real-player.png
+!artifacts/validation/ux-001-lobby-desktop.png
+!artifacts/validation/ux-001-lobby-mobile.png
+!artifacts/validation/ux-001-settings-mobile.png
+playwright-report/
+test-results/
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,41 @@
+{
+  "name": "easyplaylist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.4.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build:contracts && npm run build:api && npm run build:web",
+    "build:contracts": "npm run build -w @easyplaylist/contracts",
+    "build:api": "npm run build -w @easyplaylist/api",
+    "build:web": "npm run build -w @easyplaylist/web",
+    "e2e": "node scripts/run-compose-e2e.mjs",
+    "e2e:run": "playwright test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "oxlint --deny-warnings apps packages tests scripts playwright.config.ts vitest.config.ts vitest.failure.config.ts vitest.integration.config.ts",
+    "db:migrate": "npm run migrate -w @easyplaylist/api",
+    "test": "vitest run",
+    "test:failure-probe": "vitest run --config vitest.failure.config.ts",
+    "test:failure-probe:verify": "node scripts/verify-failure-probe.mjs",
+    "test:postgres": "node scripts/run-postgres-tests.mjs",
+    "validate:youtube-real": "node scripts/validate-youtube-real.mjs",
+    "typecheck": "npm run typecheck -w @easyplaylist/contracts && npm run typecheck -w @easyplaylist/api && npm run typecheck -w @easyplaylist/web && tsc -p tsconfig.tests.json --noEmit",
+    "dev:api": "npm run dev -w @easyplaylist/api",
+    "dev:web": "npm run dev -w @easyplaylist/web"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "oxlint": "^1.77.0",
+    "prettier": "^3.9.6",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
